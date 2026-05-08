@@ -266,6 +266,7 @@ export default function App() {
         category: r.category || "other",
         period: curPeriodKey,
       }));
+      console.log("Saving rows:", JSON.stringify(toSave, null, 2));
       await Promise.all(toSave.map(upsertExpense));
       setExpenses((prev) => [...prev, ...toSave]);
       setRows(Array.from({ length: 5 }, emptyRow));
