@@ -5,14 +5,15 @@ const SUPABASE_URL = "https://tdqoakivkegqrtopgtut.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkcW9ha2l2a2VncXJ0b3BndHV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxODYyNjcsImV4cCI6MjA5Mzc2MjI2N30.cutRceKA2ZMNLPpo-LpmMsf-PMbDyIEDicqb5lPhEwk";
 
 const sb = async (path, method = "GET", body = null) => {
+  const headers = {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  };
+  if (method === "POST") headers["Prefer"] = "resolution=merge-duplicates";
   const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
     method,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: method === "POST" ? "resolution=merge-duplicates" : "",
-    },
+    headers,
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
@@ -115,6 +116,15 @@ export default function App() {
   const [syncError, setSyncError] = useState("");
   const [initialized, setInitialized] = useState(false);
 
+  // Quick Add
+  const yesterday = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - 1); return d; }, []);
+  const toDateInput = (d) => d.toISOString().slice(0, 10);
+  const fromDateInput = (s) => new Date(s + "T00:00:00");
+  const emptyRow = () => ({ amount: "", label: "", category: "groceries", date: toDateInput(yesterday) });
+  const [rows, setRows] = useState(() => Array.from({ length: 5 }, emptyRow));
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [qFormReady] = useState(true);
+
   useEffect(() => {
     (async () => {
       setSyncStatus("loading");
@@ -206,6 +216,31 @@ export default function App() {
     catch (e) { setSyncStatus("error"); setSyncError(e.message); }
   };
 
+  const updateRow = (i, field, value) => setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
+
+  const saveAll = async () => {
+    const valid = rows.filter((r) => parseFloat(r.amount) > 0 && r.label.trim());
+    if (valid.length === 0) return;
+    setIsSavingAll(true);
+    setSyncStatus("saving");
+    try {
+      const toSave = valid.map((r) => ({
+        id: String(Date.now() + Math.random()),
+        date: fromDateInput(r.date).toDateString(),
+        amount: parseFloat(r.amount),
+        label: r.label.trim(),
+        category: r.category,
+        period: curPeriodKey,
+      }));
+      await Promise.all(toSave.map(upsertExpense));
+      setExpenses((prev) => [...prev, ...toSave]);
+      setRows(Array.from({ length: 5 }, emptyRow));
+      setSyncStatus("idle");
+      setActiveTab("calendar");
+    } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+    setIsSavingAll(false);
+  };
+
   const sync = syncStatus === "loading" ? { color: "#E8D06A", label: "⟳ LOADING" }
     : syncStatus === "saving" ? { color: "#6A9BE8", label: "⟳ SAVING" }
     : syncStatus === "error" ? { color: "#E86A6A", label: "⚠ ERROR" }
@@ -284,7 +319,7 @@ export default function App() {
       {/* TABS */}
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 24px" }}>
         <div style={{ display: "flex", borderBottom: "1px solid #2A2A35" }}>
-          {["calendar", "categories", "summary"].map((tab) => (
+          {["calendar", "quick add", "categories", "summary"].map((tab) => (
             <button key={tab} className="btn" onClick={() => setActiveTab(tab)}
               style={{ padding: "12px 16px", fontSize: 11, letterSpacing: "0.12em", color: activeTab === tab ? "#E8E4DC" : "#555", borderBottom: activeTab === tab ? "2px solid #E8936A" : "2px solid transparent", background: "none", fontFamily: "inherit", marginBottom: -1 }}>
               {tab.toUpperCase()}
@@ -403,6 +438,76 @@ export default function App() {
                 )}
               </div>
             </>
+          )}
+
+          {/* QUICK ADD */}
+          {activeTab === "quick add" && qFormReady && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 11, color: "#555" }}>Queue up multiple expenses then save them all at once.</div>
+
+              {/* Entry form */}
+              <div style={{ background: "#16161E", border: "1px solid #2A2A35", borderRadius: 12, padding: 18 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <input type="number" placeholder="Amount" value={qForm.amount} onChange={(e) => setQForm({ ...qForm, amount: e.target.value })}
+                    style={{ flex: "0 0 90px", background: "#0F0F13", border: "1px solid #2A2A35", borderRadius: 6, color: "#E8E4DC", fontSize: 14, padding: "8px 10px", fontFamily: "inherit" }} />
+                  <input type="text" placeholder="Description" value={qForm.label} onChange={(e) => setQForm({ ...qForm, label: e.target.value })}
+                    onKeyDown={(e) => e.key === "Enter" && queueExpense()}
+                    style={{ flex: 1, background: "#0F0F13", border: "1px solid #2A2A35", borderRadius: 6, color: "#E8E4DC", fontSize: 14, padding: "8px 10px", fontFamily: "inherit" }} />
+                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+                  <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>DATE</div>
+                  <input type="date" value={qForm.date} onChange={(e) => setQForm({ ...qForm, date: e.target.value })}
+                    style={{ background: "#0F0F13", border: "1px solid #2A2A35", borderRadius: 6, color: "#E8E4DC", fontSize: 13, padding: "6px 10px", fontFamily: "inherit", flex: 1 }} />
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                  {CATEGORIES.map((c) => (
+                    <button key={c.id} className="btn" onClick={() => setQForm({ ...qForm, category: c.id })}
+                      style={{ padding: "4px 10px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: qForm.category === c.id ? c.color + "33" : "#1F1F28", border: "1px solid " + (qForm.category === c.id ? c.color : "#2A2A35"), color: qForm.category === c.id ? c.color : "#666" }}>
+                      {c.icon} {c.label}
+                    </button>
+                  ))}
+                </div>
+                <button className="btn" onClick={queueExpense}
+                  style={{ width: "100%", background: "#1A1A24", border: "1px dashed #2A2A35", borderRadius: 8, padding: "10px", color: "#555", fontSize: 12, fontFamily: "inherit", letterSpacing: "0.1em" }}>
+                  + ADD TO QUEUE
+                </button>
+              </div>
+
+              {/* Queue list */}
+              {queue.length > 0 && (
+                <div style={{ background: "#16161E", border: "1px solid #2A2A35", borderRadius: 12, padding: 18 }}>
+                  <div style={{ fontSize: 10, letterSpacing: "0.15em", color: "#555", marginBottom: 14 }}>QUEUED ({queue.length})</div>
+                  {queue.map((e) => {
+                    const cat = CATEGORIES.find((c) => c.id === e.category);
+                    const d = fromDateInput(e.date);
+                    return (
+                      <div key={e.id} className="slide-in" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #1F1F28" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 28, height: 28, borderRadius: 6, background: cat.color + "22", border: "1px solid " + cat.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{cat.icon}</div>
+                          <div>
+                            <div style={{ fontSize: 13 }}>{e.label}</div>
+                            <div style={{ fontSize: 10, color: "#555", marginTop: 1 }}>{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {cat.label}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ fontSize: 14, fontWeight: 500 }}>{fmt(e.amount)}</div>
+                          <button className="btn" onClick={() => removeFromQueue(e.id)} style={{ background: "none", color: "#555", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 14 }}>
+                    <div style={{ fontSize: 12, color: "#666" }}>
+                      Total: <span style={{ color: "#E8E4DC", fontWeight: 500 }}>{fmt(queue.reduce((s, e) => s + e.amount, 0))}</span>
+                    </div>
+                    <button className="btn" onClick={saveAll} disabled={isSavingAll}
+                      style={{ background: "#E8936A", color: "#0F0F13", borderRadius: 8, padding: "10px 20px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em", opacity: isSavingAll ? 0.6 : 1 }}>
+                      {isSavingAll ? "SAVING..." : "SAVE ALL"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* CATEGORIES */}
