@@ -150,6 +150,8 @@ export default function App() {
   const [catTargets, setCatTargets] = useState({});
   const [editingTarget, setEditingTarget] = useState(null);
   const [targetInput, setTargetInput] = useState("");
+  const [expandedCats, setExpandedCats] = useState({});
+  const toggleCat = (id) => setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
   const [syncStatus, setSyncStatus] = useState("loading");
   const [syncError, setSyncError] = useState("");
   const [initialized, setInitialized] = useState(false);
@@ -613,6 +615,37 @@ export default function App() {
                         </div>
                       </>
                     )}
+                    {/* Expandable transactions */}
+                    {spent > 0 && (() => {
+                      const catExpenses = expenses
+                        .filter((e) => e.category === cat.id)
+                        .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
+                      const isExpanded = expandedCats[cat.id];
+                      return (
+                        <div style={{ marginTop: 12 }}>
+                          <button className="btn" onClick={() => toggleCat(cat.id)}
+                            style={{ width: "100%", background: "none", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontFamily: "inherit", borderTop: `1px solid ${T.border}` }}>
+                            <span style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim }}>{catExpenses.length} TRANSACTION{catExpenses.length !== 1 ? "S" : ""}</span>
+                            <span style={{ fontSize: 11, color: T.textDim, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                          </button>
+                          {isExpanded && (
+                            <div style={{ marginTop: 6 }}>
+                              {catExpenses.map((e) => (
+                                <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${T.surface3}` }}>
+                                  <div>
+                                    <div style={{ fontSize: 13 }}>{e.label}</div>
+                                    <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
+                                      {new Date(e.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: 14, fontWeight: 500, color: cat.color }}>{fmt(parseFloat(e.amount))}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -641,6 +674,10 @@ export default function App() {
                   const { spent, target, pct: catPct, status } = getCatData(cat.id);
                   if (spent === 0 && target === 0) return null;
                   const barPct = target > 0 ? catPct : (total > 0 ? (spent / total) * 100 : 0);
+                  const catExpenses = expenses
+                    .filter((e) => e.category === cat.id)
+                    .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
+                  const isExpanded = expandedCats[`summary_${cat.id}`];
                   return (
                     <div key={cat.id} style={{ marginBottom: 16 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
@@ -650,9 +687,33 @@ export default function App() {
                           <span style={{ fontSize: 12, color: cat.color }}>{fmt(spent)}{target > 0 ? ` / ${fmt(target)}` : ""}</span>
                         </div>
                       </div>
-                      <div style={{ height: 4, background: T.border, borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: 4, background: T.border, borderRadius: 2, overflow: "hidden", marginBottom: 6 }}>
                         <div style={{ height: "100%", width: `${barPct}%`, background: target > 0 && catPct >= 100 ? "#E86A6A" : cat.color, borderRadius: 3, transition: "width 0.4s ease" }} />
                       </div>
+                      {catExpenses.length > 0 && (
+                        <>
+                          <button className="btn" onClick={() => toggleCat(`summary_${cat.id}`)}
+                            style={{ background: "none", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "4px 0", fontFamily: "inherit" }}>
+                            <span style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim }}>{catExpenses.length} TRANSACTION{catExpenses.length !== 1 ? "S" : ""}</span>
+                            <span style={{ fontSize: 11, color: T.textDim, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                          </button>
+                          {isExpanded && (
+                            <div style={{ marginTop: 4 }}>
+                              {catExpenses.map((e) => (
+                                <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${T.surface3}` }}>
+                                  <div>
+                                    <div style={{ fontSize: 12 }}>{e.label}</div>
+                                    <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
+                                      {new Date(e.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: 13, fontWeight: 500, color: cat.color }}>{fmt(parseFloat(e.amount))}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   );
                 }).filter(Boolean)}
