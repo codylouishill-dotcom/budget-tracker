@@ -15,9 +15,11 @@ const sb = async (path, method = "GET", body = null) => {
     method, headers,
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  if (!res.ok) { const err = await res.text(); throw new Error(`Supabase error: ${res.status} ${err}`); }
-  if (res.status === 204) return null;
-  return res.json();
+  if (!res.ok) { const err = await res.text(); throw new Error(`${res.status}: ${err}`); }
+  if (res.status === 204 || res.headers.get("content-length") === "0") return null;
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 };
 
 const loadExpenses = (period) => sb(`/expenses?period=eq.${encodeURIComponent(period)}&order=created_at.asc`);
