@@ -260,10 +260,10 @@ export default function App() {
     try {
       const toSave = valid.map((r) => ({
         id: String(Date.now() + Math.random()),
-        date: fromDateInput(r.date).toDateString(),
+        date: (r.date ? fromDateInput(r.date) : todayDate).toDateString(),
         amount: parseFloat(r.amount),
         label: r.label.trim(),
-        category: r.category,
+        category: r.category || "other",
         period: curPeriodKey,
       }));
       await Promise.all(toSave.map(upsertExpense));
@@ -271,7 +271,7 @@ export default function App() {
       setRows(Array.from({ length: 5 }, emptyRow));
       setSyncStatus("idle");
       setActiveTab("calendar");
-    } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+    } catch (e) { setSyncStatus("error"); setSyncError(`Quick Add: ${e.message}`); }
     setIsSavingAll(false);
   };
 
