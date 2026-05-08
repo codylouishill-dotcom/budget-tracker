@@ -117,10 +117,10 @@ export default function App() {
   const [initialized, setInitialized] = useState(false);
 
   // Quick Add
-  const yesterday = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - 1); return d; }, []);
+  
   const toDateInput = (d) => d.toISOString().slice(0, 10);
   const fromDateInput = (s) => new Date(s + "T00:00:00");
-  const emptyRow = () => ({ amount: "", label: "", category: "groceries", date: toDateInput(yesterday) });
+  const emptyRow = () => ({ amount: "", label: "", category: "groceries", date: toDateInput(todayDate) });
   const [rows, setRows] = useState(() => Array.from({ length: 5 }, emptyRow));
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [qFormReady] = useState(true);
@@ -441,72 +441,67 @@ export default function App() {
           )}
 
           {/* QUICK ADD */}
-          {activeTab === "quick add" && qFormReady && (
+          {activeTab === "quick add" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 11, color: "#555" }}>Queue up multiple expenses then save them all at once.</div>
+              <div style={{ fontSize: 11, color: "#555" }}>Fill in what you need, skip the rest, then hit Save.</div>
 
-              {/* Entry form */}
-              <div style={{ background: "#16161E", border: "1px solid #2A2A35", borderRadius: 12, padding: 18 }}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                  <input type="number" placeholder="Amount" value={qForm.amount} onChange={(e) => setQForm({ ...qForm, amount: e.target.value })}
-                    style={{ flex: "0 0 90px", background: "#0F0F13", border: "1px solid #2A2A35", borderRadius: 6, color: "#E8E4DC", fontSize: 14, padding: "8px 10px", fontFamily: "inherit" }} />
-                  <input type="text" placeholder="Description" value={qForm.label} onChange={(e) => setQForm({ ...qForm, label: e.target.value })}
-                    onKeyDown={(e) => e.key === "Enter" && queueExpense()}
-                    style={{ flex: 1, background: "#0F0F13", border: "1px solid #2A2A35", borderRadius: 6, color: "#E8E4DC", fontSize: 14, padding: "8px 10px", fontFamily: "inherit" }} />
-                </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-                  <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>DATE</div>
-                  <input type="date" value={qForm.date} onChange={(e) => setQForm({ ...qForm, date: e.target.value })}
-                    style={{ background: "#0F0F13", border: "1px solid #2A2A35", borderRadius: 6, color: "#E8E4DC", fontSize: 13, padding: "6px 10px", fontFamily: "inherit", flex: 1 }} />
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                  {CATEGORIES.map((c) => (
-                    <button key={c.id} className="btn" onClick={() => setQForm({ ...qForm, category: c.id })}
-                      style={{ padding: "4px 10px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: qForm.category === c.id ? c.color + "33" : "#1F1F28", border: "1px solid " + (qForm.category === c.id ? c.color : "#2A2A35"), color: qForm.category === c.id ? c.color : "#666" }}>
-                      {c.icon} {c.label}
-                    </button>
+              <div style={{ background: "#16161E", border: "1px solid #2A2A35", borderRadius: 12, overflow: "hidden" }}>
+                {/* Column headers */}
+                <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 100px 36px", gap: 0, padding: "10px 16px", borderBottom: "1px solid #2A2A35" }}>
+                  {["AMOUNT", "DESCRIPTION", "DATE", ""].map((h) => (
+                    <div key={h} style={{ fontSize: 9, letterSpacing: "0.12em", color: "#444" }}>{h}</div>
                   ))}
                 </div>
-                <button className="btn" onClick={queueExpense}
-                  style={{ width: "100%", background: "#1A1A24", border: "1px dashed #2A2A35", borderRadius: 8, padding: "10px", color: "#555", fontSize: 12, fontFamily: "inherit", letterSpacing: "0.1em" }}>
-                  + ADD TO QUEUE
-                </button>
-              </div>
 
-              {/* Queue list */}
-              {queue.length > 0 && (
-                <div style={{ background: "#16161E", border: "1px solid #2A2A35", borderRadius: 12, padding: 18 }}>
-                  <div style={{ fontSize: 10, letterSpacing: "0.15em", color: "#555", marginBottom: 14 }}>QUEUED ({queue.length})</div>
-                  {queue.map((e) => {
-                    const cat = CATEGORIES.find((c) => c.id === e.category);
-                    const d = fromDateInput(e.date);
-                    return (
-                      <div key={e.id} className="slide-in" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #1F1F28" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ width: 28, height: 28, borderRadius: 6, background: cat.color + "22", border: "1px solid " + cat.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{cat.icon}</div>
-                          <div>
-                            <div style={{ fontSize: 13 }}>{e.label}</div>
-                            <div style={{ fontSize: 10, color: "#555", marginTop: 1 }}>{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {cat.label}</div>
-                          </div>
+                {/* Rows */}
+                {rows.map((row, i) => {
+                  const cat = CATEGORIES.find((c) => c.id === row.category);
+                  const filled = parseFloat(row.amount) > 0 || row.label.trim();
+                  return (
+                    <div key={i} style={{ borderBottom: i < 4 ? "1px solid #1F1F28" : "none" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 100px 36px", gap: 0, padding: "10px 16px", alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ color: "#555", fontSize: 12 }}>$</span>
+                          <input type="number" placeholder="0.00" value={row.amount} onChange={(e) => updateRow(i, "amount", e.target.value)}
+                            style={{ width: "100%", background: "transparent", border: "none", color: "#E8E4DC", fontSize: 14, fontFamily: "inherit", padding: 0 }} />
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <div style={{ fontSize: 14, fontWeight: 500 }}>{fmt(e.amount)}</div>
-                          <button className="btn" onClick={() => removeFromQueue(e.id)} style={{ background: "none", color: "#555", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
-                        </div>
+                        <input type="text" placeholder="Description" value={row.label} onChange={(e) => updateRow(i, "label", e.target.value)}
+                          style={{ background: "transparent", border: "none", color: "#E8E4DC", fontSize: 13, fontFamily: "inherit", padding: "0 8px" }} />
+                        <input type="date" value={row.date} onChange={(e) => updateRow(i, "date", e.target.value)}
+                          style={{ background: "transparent", border: "none", color: filled ? "#E8E4DC" : "#555", fontSize: 11, fontFamily: "inherit", padding: 0, width: "100%" }} />
+                        <div style={{ textAlign: "center", fontSize: 15 }}>{filled ? cat.icon : ""}</div>
                       </div>
-                    );
-                  })}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 14 }}>
-                    <div style={{ fontSize: 12, color: "#666" }}>
-                      Total: <span style={{ color: "#E8E4DC", fontWeight: 500 }}>{fmt(queue.reduce((s, e) => s + e.amount, 0))}</span>
+                      {/* Category picker - shown when row has content */}
+                      {filled && (
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "0 16px 10px" }}>
+                          {CATEGORIES.map((c) => (
+                            <button key={c.id} className="btn" onClick={() => updateRow(i, "category", c.id)}
+                              style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.category === c.id ? c.color + "33" : "#1A1A24", border: "1px solid " + (row.category === c.id ? c.color : "#2A2A35"), color: row.category === c.id ? c.color : "#555" }}>
+                              {c.icon} {c.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <button className="btn" onClick={saveAll} disabled={isSavingAll}
-                      style={{ background: "#E8936A", color: "#0F0F13", borderRadius: 8, padding: "10px 20px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em", opacity: isSavingAll ? 0.6 : 1 }}>
-                      {isSavingAll ? "SAVING..." : "SAVE ALL"}
-                    </button>
+                  );
+                })}
+
+                {/* Footer */}
+                <div style={{ padding: "14px 16px", borderTop: "1px solid #2A2A35", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 12, color: "#666" }}>
+                    {rows.filter((r) => parseFloat(r.amount) > 0 && r.label.trim()).length} entries
+                    {rows.filter((r) => parseFloat(r.amount) > 0 && r.label.trim()).length > 0 && (
+                      <span style={{ marginLeft: 8, color: "#E8E4DC" }}>
+                        · {fmt(rows.filter((r) => parseFloat(r.amount) > 0 && r.label.trim()).reduce((s, r) => s + parseFloat(r.amount), 0))}
+                      </span>
+                    )}
                   </div>
+                  <button className="btn" onClick={saveAll} disabled={isSavingAll}
+                    style={{ background: "#E8936A", color: "#0F0F13", borderRadius: 8, padding: "10px 20px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em", opacity: isSavingAll ? 0.6 : 1 }}>
+                    {isSavingAll ? "SAVING..." : "SAVE ALL"}
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
