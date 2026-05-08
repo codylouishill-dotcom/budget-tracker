@@ -216,10 +216,14 @@ export default function App() {
   // Totals — excluded categories don't count toward header totals
   const total = expenses.filter((e) => !excludedCats[e.category]).reduce((s, e) => s + parseFloat(e.amount), 0);
   const totalIncExcluded = expenses.reduce((s, e) => s + parseFloat(e.amount), 0);
-  const remaining = budget - total;
-  const pct = Math.min((total / budget) * 100, 100);
-  const dailyBudget = budget / periodLength;
-  const statusColor = pct < 60 ? "#6AE89B" : pct < 85 ? "#E8D06A" : "#E86A6A";
+  const recurringTarget = catTargets["recurring"] || 0;
+  const effectiveBudget = Math.max(budget - recurringTarget, 0);
+  const remaining = effectiveBudget - total;
+  const pct = Math.min((total / Math.max(effectiveBudget, 1)) * 100, 100);
+  const dailyBudget = effectiveBudget / periodLength;
+  const expectedPct = progressFraction * 100;
+  const paceRatio = expectedPct > 0 ? pct / expectedPct : 0;
+  const statusColor = paceRatio <= 1.0 ? "#6AE89B" : paceRatio <= 1.25 ? "#E8D06A" : "#E86A6A";
   const daysElapsed = Math.max(1, days.filter((d) => { const x = new Date(d); x.setHours(0,0,0,0); return x <= todayDate; }).length);
   const progressFraction = daysElapsed / periodLength;
   const totalTargeted = Object.values(catTargets).reduce((s, v) => s + (v || 0), 0);
@@ -386,6 +390,11 @@ export default function App() {
                 ) : (
                   <div onClick={() => { setEditBudget(true); setBudgetInput(String(budget)); }}
                     style={{ fontSize: 20, fontWeight: 500, cursor: "pointer", borderBottom: `1px dashed ${T.border2}` }}>{fmt(budget)}</div>
+                  {recurringTarget > 0 && (
+                    <div style={{ fontSize: 10, color: T.textFaint, marginTop: 2 }}>
+                      {fmt(effectiveBudget)} discretionary
+                    </div>
+                  )}
                 )}
               </div>
             </div>
@@ -608,8 +617,8 @@ export default function App() {
                   <div style={{ fontSize: 11, color: T.textMuted }}>TARGETS ALLOCATED</div>
                   <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
                     <span style={{ fontSize: 14, fontWeight: 500 }}>{fmt(totalTargeted)}</span>
-                    <span style={{ fontSize: 11, color: totalTargeted > budget ? "#E86A6A" : T.textDim }}>
-                      {totalTargeted > budget ? `${fmt(totalTargeted - budget)} over` : `${fmt(budget - totalTargeted)} unallocated`}
+                    <span style={{ fontSize: 11, color: totalTargeted > effectiveBudget ? "#E86A6A" : T.textDim }}>
+                      {totalTargeted > effectiveBudget ? `${fmt(totalTargeted - effectiveBudget)} over` : `${fmt(effectiveBudget - totalTargeted)} unallocated`}
                     </span>
                   </div>
                 </div>
