@@ -16,6 +16,12 @@ const sb = async (path, method = "GET", body = null) => {
 };
 
 const loadExpensesForPeriods = (keys) => sb(`/expenses?period=in.(${keys.map(k => `"${k}"`).join(",")})&order=created_at.asc`);
+const loadFunds = () => sb("/funds?order=created_at.asc");
+const upsertFund = (fund) => sb("/funds", "POST", fund);
+const deleteFund = (id) => sb(`/funds?id=eq.${id}`, "DELETE");
+const loadFundTransactions = () => sb("/fund_transactions?order=created_at.asc");
+const upsertFundTransaction = (tx) => sb("/fund_transactions", "POST", tx);
+const deleteFundTransaction = (id) => sb(`/fund_transactions?id=eq.${id}`, "DELETE");
 const upsertExpense = (exp) => sb("/expenses", "POST", exp);
 const deleteExpense = (id) => sb(`/expenses?id=eq.${id}`, "DELETE");
 const loadSettings = () => sb("/settings?select=key,value");
@@ -147,6 +153,17 @@ export default function App() {
   const [targetInput, setTargetInput] = useState("");
   const [expandedCats, setExpandedCats] = useState({});
   const toggleCat = (id) => setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  // Funds
+  const [funds, setFunds] = useState([]);
+  const [fundTransactions, setFundTransactions] = useState([]);
+  const [expandedFunds, setExpandedFunds] = useState({});
+  const toggleFund = (id) => setExpandedFunds((prev) => ({ ...prev, [id]: !prev[id] }));
+  const [showNewFund, setShowNewFund] = useState(false);
+  const [newFund, setNewFund] = useState({ name: "", icon: "🎯", target: "", end_date: "" });
+  const [activeFundId, setActiveFundId] = useState(null); // fund being transacted
+  const [fundTxForm, setFundTxForm] = useState({ amount: "", label: "", date: "" });
+  const [editingFund, setEditingFund] = useState(null);
   const [editingExpense, setEditingExpense] = useState(null); // { id, amount, label, category }
   const startEdit = (e) => setEditingExpense({ id: e.id, amount: String(e.amount), label: e.label, category: e.category });
   const cancelEdit = () => setEditingExpense(null);
@@ -168,10 +185,14 @@ export default function App() {
       setInitialized(false);
       try {
         const keys = getPeriodKeysForRange(periodStart, periodEnd, payDates);
-        const [exps, settings] = await Promise.all([
+        const [exps, settings, fundsData, fundTxData] = await Promise.all([
           loadExpensesForPeriods(keys),
           loadSettings(),
+          loadFunds(),
+          loadFundTransactions(),
         ]);
+        setFunds(fundsData || []);
+        setFundTransactions(fundTxData || []);
         // Filter to only expenses whose date falls within the period
         const filtered = (exps || []).filter((e) => {
           const d = new Date(e.date); d.setHours(0,0,0,0);
@@ -280,6 +301,44 @@ export default function App() {
     setSyncStatus("saving");
     try { await upsertExpense(updated); setSyncStatus("idle"); }
     catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const createFund = async () => {
+    if (!newFund.name.trim() || !newFund.target) return;
+    const fund = { id: String(Date.now()), name: newFund.name.trim(), icon: newFund.icon || "🎯", target: parseFloat(newFund.target), end_date: newFund.end_date || null };
+    setFunds((prev) => [...prev, fund]);
+    setNewFund({ name: "", icon: "🎯", target: "", end_date: "" });
+    setShowNewFund(false);
+    try { await upsertFund(fund); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const removeFund = async (id) => {
+    setFunds((prev) => prev.filter((f) => f.id !== id));
+    setFundTransactions((prev) => prev.filter((t) => t.fund_id !== id));
+    try { await deleteFund(id); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const addFundTransaction = async (fundId) => {
+    const amt = parseFloat(fundTxForm.amount);
+    if (!amt || amt <= 0 || !fundTxForm.label.trim()) return;
+    const tx = { id: String(Date.now()), fund_id: fundId, amount: amt, label: fundTxForm.label.trim(), date: fundTxForm.date || new Date().toISOString().slice(0, 10) };
+    setFundTransactions((prev) => [...prev, tx]);
+    setFundTxForm({ amount: "", label: "", date: "" });
+    setActiveFundId(null);
+    try { await upsertFundTransaction(tx); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const removeFundTransaction = async (id) => {
+    setFundTransactions((prev) => prev.filter((t) => t.id !== id));
+    try { await deleteFundTransaction(id); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const saveEditFund = async () => {
+    if (!editingFund) return;
+    setFunds((prev) => prev.map((f) => f.id === editingFund.id ? { ...f, ...editingFund } : f));
+    const updated = funds.find((f) => f.id === editingFund.id);
+    setEditingFund(null);
+    try { await upsertFund({ ...updated, ...editingFund }); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
   };
 
   const confirmBudget = async () => {
@@ -450,7 +509,7 @@ export default function App() {
       {/* TABS */}
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 24px" }}>
         <div style={{ display: "flex", borderBottom: `1px solid ${T.border}`, overflowX: "auto" }}>
-          {["calendar", "quick add", "categories", "summary"].map((tab) => (
+          {["calendar", "quick add", "categories", "funds", "summary"].map((tab) => (
             <button key={tab} className="btn" onClick={() => setActiveTab(tab)}
               style={{ padding: "12px 14px", fontSize: 11, letterSpacing: "0.1em", color: activeTab === tab ? T.text : T.textDim, borderBottom: activeTab === tab ? `2px solid ${T.accent}` : "2px solid transparent", background: "none", fontFamily: "inherit", marginBottom: -1, whiteSpace: "nowrap" }}>
               {tab.toUpperCase()}
@@ -761,6 +820,190 @@ export default function App() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* FUNDS */}
+          {activeTab === "funds" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 11, color: T.textDim }}>Track spending toward special goals — holidays, travel, big purchases. These don't affect your monthly budget.</div>
+
+              {/* Fund cards */}
+              {funds.map((fund) => {
+                const txs = fundTransactions.filter((t) => t.fund_id === fund.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+                const spent = txs.reduce((s, t) => s + parseFloat(t.amount), 0);
+                const target = parseFloat(fund.target);
+                const pctUsed = Math.min((spent / Math.max(target, 1)) * 100, 100);
+                const fundRemaining = target - spent;
+                const isExpanded = expandedFunds[fund.id];
+                const isAddingTx = activeFundId === fund.id;
+                const isEditingThis = editingFund?.id === fund.id;
+                const daysLeft = fund.end_date ? Math.max(0, Math.ceil((new Date(fund.end_date) - new Date()) / 86400000)) : null;
+                const barColor = pctUsed >= 100 ? "#E86A6A" : pctUsed >= 80 ? "#E8D06A" : "#6AE89B";
+                const ytdYear = new Date().getFullYear();
+                const ytdSpent = txs.filter((t) => t.date.startsWith(String(ytdYear))).reduce((s, t) => s + parseFloat(t.amount), 0);
+
+                return (
+                  <div key={fund.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 18 }}>
+                    {isEditingThis ? (
+                      <div>
+                        <div style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim, marginBottom: 10 }}>EDIT FUND</div>
+                        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                          <input type="text" value={editingFund.icon} onChange={(e) => setEditingFund((p) => ({ ...p, icon: e.target.value }))}
+                            style={{ width: 44, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 18, padding: "6px 8px", fontFamily: "inherit", outline: "none", textAlign: "center" }} />
+                          <input type="text" placeholder="Fund name" value={editingFund.name} onChange={(e) => setEditingFund((p) => ({ ...p, name: e.target.value }))}
+                            style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                        </div>
+                        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                            <span style={{ color: T.textDim, fontSize: 12 }}>$</span>
+                            <input type="number" placeholder="Target" value={editingFund.target} onChange={(e) => setEditingFund((p) => ({ ...p, target: e.target.value }))}
+                              style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                          </div>
+                          <input type="date" value={editingFund.end_date || ""} onChange={(e) => setEditingFund((p) => ({ ...p, end_date: e.target.value }))}
+                            style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="btn" onClick={saveEditFund} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "9px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em" }}>SAVE</button>
+                          <button className="btn" onClick={() => setEditingFund(null)} style={{ padding: "9px 14px", background: T.surface2, border: `1px solid ${T.border}`, color: T.textMuted, borderRadius: 8, fontSize: 12, fontFamily: "inherit" }}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Header */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 10, background: T.surface2, border: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{fund.icon}</div>
+                            <div>
+                              <div style={{ fontSize: 15, fontWeight: 500 }}>{fund.name}</div>
+                              <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
+                                {daysLeft !== null ? (daysLeft === 0 ? "Due today" : `${daysLeft}d left`) : "No end date"}
+                                {" · "}YTD: {fmt(ytdSpent)}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button className="btn" onClick={() => setEditingFund({ ...fund })} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, color: T.textDim, fontSize: 11, padding: "3px 8px", fontFamily: "inherit" }}>edit</button>
+                            <button className="btn" onClick={() => removeFund(fund.id)} style={{ background: "none", color: T.textDim, fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                          </div>
+                        </div>
+
+                        {/* Progress */}
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.textMuted, marginBottom: 6 }}>
+                          <span style={{ color: barColor }}>{fmt(spent)} spent</span>
+                          <span>of {fmt(target)}</span>
+                        </div>
+                        <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
+                          <div style={{ height: "100%", width: `${pctUsed}%`, background: barColor, borderRadius: 3, transition: "width 0.4s ease" }} />
+                        </div>
+
+                        {/* Stats row */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                          {[
+                            { label: "SPENT", value: fmt(spent), color: barColor },
+                            { label: "REMAINING", value: fmt(fundRemaining), color: fundRemaining >= 0 ? T.text : "#E86A6A" },
+                            { label: "% USED", value: `${pctUsed.toFixed(0)}%`, color: pctUsed >= 100 ? "#E86A6A" : pctUsed >= 80 ? "#E8D06A" : "#6AE89B" },
+                          ].map((s) => (
+                            <div key={s.label} style={{ background: T.surface2, borderRadius: 8, padding: "8px 10px" }}>
+                              <div style={{ fontSize: 8, letterSpacing: "0.15em", color: T.textDim, marginBottom: 3 }}>{s.label}</div>
+                              <div style={{ fontSize: 13, fontWeight: 500, color: s.color }}>{s.value}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add transaction */}
+                        {isAddingTx ? (
+                          <div style={{ background: T.surface2, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                              <input type="number" placeholder="Amount" value={fundTxForm.amount} onChange={(e) => setFundTxForm((p) => ({ ...p, amount: e.target.value }))}
+                                style={{ flex: "0 0 90px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 10px", fontFamily: "inherit", outline: "none" }} />
+                              <input type="text" placeholder="Description" value={fundTxForm.label} onChange={(e) => setFundTxForm((p) => ({ ...p, label: e.target.value }))}
+                                onKeyDown={(e) => e.key === "Enter" && addFundTransaction(fund.id)}
+                                style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 10px", fontFamily: "inherit", outline: "none" }} />
+                            </div>
+                            <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                              <span style={{ fontSize: 10, color: T.textDim, letterSpacing: "0.1em" }}>DATE</span>
+                              <input type="date" value={fundTxForm.date} onChange={(e) => setFundTxForm((p) => ({ ...p, date: e.target.value }))}
+                                style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                            </div>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button className="btn" onClick={() => addFundTransaction(fund.id)} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "9px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em" }}>ADD</button>
+                              <button className="btn" onClick={() => setActiveFundId(null)} style={{ padding: "9px 14px", background: T.surface2, border: `1px solid ${T.border}`, color: T.textMuted, borderRadius: 8, fontSize: 12, fontFamily: "inherit" }}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button className="btn" onClick={() => { setActiveFundId(fund.id); setFundTxForm({ amount: "", label: "", date: new Date().toISOString().slice(0, 10) }); }}
+                            style={{ width: "100%", background: T.surface2, border: `1px dashed ${T.border}`, borderRadius: 8, padding: "9px", color: T.textDim, fontSize: 12, fontFamily: "inherit", letterSpacing: "0.1em", marginBottom: txs.length > 0 ? 10 : 0 }}>
+                            + LOG EXPENSE
+                          </button>
+                        )}
+
+                        {/* Transactions */}
+                        {txs.length > 0 && (
+                          <>
+                            <button className="btn" onClick={() => toggleFund(fund.id)}
+                              style={{ width: "100%", background: "none", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontFamily: "inherit", borderTop: `1px solid ${T.border}` }}>
+                              <span style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim }}>{txs.length} TRANSACTION{txs.length !== 1 ? "S" : ""}</span>
+                              <span style={{ fontSize: 11, color: T.textDim, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                            </button>
+                            {isExpanded && (
+                              <div style={{ marginTop: 6 }}>
+                                {txs.map((t) => (
+                                  <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${T.surface3}` }}>
+                                    <div>
+                                      <div style={{ fontSize: 13 }}>{t.label}</div>
+                                      <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>{new Date(t.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                      <div style={{ fontSize: 14, fontWeight: 500 }}>{fmt(parseFloat(t.amount))}</div>
+                                      <button className="btn" onClick={() => removeFundTransaction(t.id)} style={{ background: "none", color: T.textDim, fontSize: 16, padding: "0 2px", lineHeight: 1 }}>×</button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* New fund form */}
+              {showNewFund ? (
+                <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 18 }}>
+                  <div style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim, marginBottom: 12 }}>NEW FUND</div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <input type="text" placeholder="🎯" value={newFund.icon} onChange={(e) => setNewFund((p) => ({ ...p, icon: e.target.value }))}
+                      style={{ width: 44, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 18, padding: "6px 8px", fontFamily: "inherit", outline: "none", textAlign: "center" }} />
+                    <input type="text" placeholder="Fund name (e.g. Christmas)" value={newFund.name} onChange={(e) => setNewFund((p) => ({ ...p, name: e.target.value }))}
+                      style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                      <span style={{ color: T.textDim, fontSize: 12 }}>$</span>
+                      <input type="number" placeholder="Target amount" value={newFund.target} onChange={(e) => setNewFund((p) => ({ ...p, target: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && createFund()}
+                        style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <input type="date" value={newFund.end_date} onChange={(e) => setNewFund((p) => ({ ...p, end_date: e.target.value }))}
+                        style={{ width: "100%", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: newFund.end_date ? T.text : T.textDim, fontSize: 13, padding: "6px 10px", fontFamily: "inherit", outline: "none" }} />
+                      <div style={{ fontSize: 9, color: T.textFaint, marginTop: 3 }}>End date (optional)</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" onClick={createFund} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em" }}>CREATE FUND</button>
+                    <button className="btn" onClick={() => setShowNewFund(false)} style={{ padding: "10px 14px", background: T.surface2, border: `1px solid ${T.border}`, color: T.textMuted, borderRadius: 8, fontSize: 12, fontFamily: "inherit" }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn" onClick={() => setShowNewFund(true)}
+                  style={{ width: "100%", background: T.surface, border: `1px dashed ${T.border}`, borderRadius: 12, padding: "14px", color: T.textDim, fontSize: 12, fontFamily: "inherit", letterSpacing: "0.1em" }}>
+                  + NEW FUND
+                </button>
+              )}
             </div>
           )}
 
