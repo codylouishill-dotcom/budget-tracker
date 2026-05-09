@@ -138,10 +138,7 @@ export default function App() {
   const [editBudget, setEditBudget] = useState(false);
   const [budgetInput, setBudgetInput] = useState("1000");
   const [allExpenses, setAllExpenses] = useState([]); // all loaded expenses
-  const [selectedDay, setSelectedDay] = useState(() => {
-    const idx = days.findIndex((d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime() === todayDate.getTime(); });
-    return idx >= 0 ? idx : 0;
-  });
+  const [selectedDay, setSelectedDay] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ amount: "", label: "", category: "groceries" });
   const [activeTab, setActiveTab] = useState("calendar");
@@ -206,11 +203,11 @@ export default function App() {
     })();
   }, [viewMode, curPeriodKey]);
 
-  // Reset selectedDay when period changes
+  // Reset selectedDay when period or days change
   useEffect(() => {
     const idx = days.findIndex((d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime() === todayDate.getTime(); });
     setSelectedDay(idx >= 0 ? idx : 0);
-  }, [viewMode]);
+  }, [viewMode, days.length]);
 
   // Expenses filtered to current view window
   const expenses = allExpenses;
@@ -224,11 +221,11 @@ export default function App() {
   const remaining = effectiveBudget - total;
   const pct = Math.min((total / Math.max(effectiveBudget, 1)) * 100, 100);
   const dailyBudget = effectiveBudget / periodLength;
+  const daysElapsed = Math.max(1, days.filter((d) => { const x = new Date(d); x.setHours(0,0,0,0); return x <= todayDate; }).length);
+  const progressFraction = daysElapsed / periodLength;
   const expectedPct = progressFraction * 100;
   const paceRatio = expectedPct > 0 ? pct / expectedPct : 0;
   const statusColor = paceRatio <= 1.0 ? "#6AE89B" : paceRatio <= 1.25 ? "#E8D06A" : "#E86A6A";
-  const daysElapsed = Math.max(1, days.filter((d) => { const x = new Date(d); x.setHours(0,0,0,0); return x <= todayDate; }).length);
-  const progressFraction = daysElapsed / periodLength;
   const totalTargeted = Object.values(catTargets).reduce((s, v) => s + (v || 0), 0);
   const hasExcluded = Object.values(excludedCats).some(Boolean);
 
