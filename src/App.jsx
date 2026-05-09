@@ -304,8 +304,8 @@ export default function App() {
   };
 
   const createFund = async () => {
-    if (!newFund.name.trim() || !newFund.target) return;
-    const fund = { id: String(Date.now()), name: newFund.name.trim(), icon: newFund.icon || "🎯", target: parseFloat(newFund.target), end_date: newFund.end_date || null };
+    if (!newFund.name.trim()) return;
+    const fund = { id: String(Date.now()), name: newFund.name.trim(), icon: newFund.icon || "🎯", target: newFund.target ? parseFloat(newFund.target) : null, end_date: newFund.end_date || null };
     setFunds((prev) => [...prev, fund]);
     setNewFund({ name: "", icon: "🎯", target: "", end_date: "" });
     setShowNewFund(false);
@@ -832,14 +832,14 @@ export default function App() {
               {funds.map((fund) => {
                 const txs = fundTransactions.filter((t) => t.fund_id === fund.id).sort((a, b) => new Date(b.date) - new Date(a.date));
                 const spent = txs.reduce((s, t) => s + parseFloat(t.amount), 0);
-                const target = parseFloat(fund.target);
-                const pctUsed = Math.min((spent / Math.max(target, 1)) * 100, 100);
-                const fundRemaining = target - spent;
+                const target = fund.target != null ? parseFloat(fund.target) : null;
+                const pctUsed = target ? Math.min((spent / Math.max(target, 1)) * 100, 100) : null;
+                const fundRemaining = target != null ? target - spent : null;
                 const isExpanded = expandedFunds[fund.id];
                 const isAddingTx = activeFundId === fund.id;
                 const isEditingThis = editingFund?.id === fund.id;
                 const daysLeft = fund.end_date ? Math.max(0, Math.ceil((new Date(fund.end_date) - new Date()) / 86400000)) : null;
-                const barColor = pctUsed >= 100 ? "#E86A6A" : pctUsed >= 80 ? "#E8D06A" : "#6AE89B";
+                const barColor = pctUsed == null ? "#6AE89B" : pctUsed >= 100 ? "#E86A6A" : pctUsed >= 80 ? "#E8D06A" : "#6AE89B";
                 const ytdYear = new Date().getFullYear();
                 const ytdSpent = txs.filter((t) => t.date.startsWith(String(ytdYear))).reduce((s, t) => s + parseFloat(t.amount), 0);
 
@@ -889,27 +889,33 @@ export default function App() {
                         </div>
 
                         {/* Progress */}
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.textMuted, marginBottom: 6 }}>
-                          <span style={{ color: barColor }}>{fmt(spent)} spent</span>
-                          <span>of {fmt(target)}</span>
-                        </div>
-                        <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
-                          <div style={{ height: "100%", width: `${pctUsed}%`, background: barColor, borderRadius: 3, transition: "width 0.4s ease" }} />
-                        </div>
-
-                        {/* Stats row */}
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
-                          {[
-                            { label: "SPENT", value: fmt(spent), color: barColor },
-                            { label: "REMAINING", value: fmt(fundRemaining), color: fundRemaining >= 0 ? T.text : "#E86A6A" },
-                            { label: "% USED", value: `${pctUsed.toFixed(0)}%`, color: pctUsed >= 100 ? "#E86A6A" : pctUsed >= 80 ? "#E8D06A" : "#6AE89B" },
-                          ].map((s) => (
-                            <div key={s.label} style={{ background: T.surface2, borderRadius: 8, padding: "8px 10px" }}>
-                              <div style={{ fontSize: 8, letterSpacing: "0.15em", color: T.textDim, marginBottom: 3 }}>{s.label}</div>
-                              <div style={{ fontSize: 13, fontWeight: 500, color: s.color }}>{s.value}</div>
+                        {target != null ? (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.textMuted, marginBottom: 6 }}>
+                              <span style={{ color: barColor }}>{fmt(spent)} spent</span>
+                              <span>of {fmt(target)}</span>
                             </div>
-                          ))}
-                        </div>
+                            <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
+                              <div style={{ height: "100%", width: `${pctUsed}%`, background: barColor, borderRadius: 3, transition: "width 0.4s ease" }} />
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                              {[
+                                { label: "SPENT", value: fmt(spent), color: barColor },
+                                { label: "REMAINING", value: fmt(fundRemaining), color: fundRemaining >= 0 ? T.text : "#E86A6A" },
+                                { label: "% USED", value: `${pctUsed.toFixed(0)}%`, color: pctUsed >= 100 ? "#E86A6A" : pctUsed >= 80 ? "#E8D06A" : "#6AE89B" },
+                              ].map((s) => (
+                                <div key={s.label} style={{ background: T.surface2, borderRadius: 8, padding: "8px 10px" }}>
+                                  <div style={{ fontSize: 8, letterSpacing: "0.15em", color: T.textDim, marginBottom: 3 }}>{s.label}</div>
+                                  <div style={{ fontSize: 13, fontWeight: 500, color: s.color }}>{s.value}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 12 }}>
+                            Total spent: <span style={{ color: T.text, fontWeight: 500 }}>{fmt(spent)}</span>
+                          </div>
+                        )}
 
                         {/* Add transaction */}
                         {isAddingTx ? (
