@@ -219,9 +219,10 @@ export default function App() {
   const effectiveBudget = Math.max(budget - recurringTarget, 0);
   const remaining = effectiveBudget - total;
   const pct = Math.min((total / Math.max(effectiveBudget, 1)) * 100, 100);
-  const dailyBudget = effectiveBudget / periodLength;
   const daysElapsed = Math.max(1, days.filter((d) => { const x = new Date(d); x.setHours(0,0,0,0); return x <= todayDate; }).length);
   const progressFraction = daysElapsed / periodLength;
+  const daysRemaining = Math.max(1, periodLength - daysElapsed + 1);
+  const dailyBudget = remaining > 0 ? remaining / daysRemaining : 0;
   const expectedPct = progressFraction * 100;
   const paceRatio = expectedPct > 0 ? pct / expectedPct : 0;
   const statusColor = paceRatio <= 1.0 ? "#6AE89B" : paceRatio <= 1.25 ? "#E8D06A" : "#E86A6A";
@@ -498,7 +499,7 @@ export default function App() {
                     <div style={{ fontSize: 16, fontWeight: 500 }}>{days[selectedDay].toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10, color: T.textDim, marginBottom: 2 }}>DAILY BUDGET</div>
+                    <div style={{ fontSize: 10, color: T.textDim, marginBottom: 2 }}>REMAINING/DAY</div>
                     <div style={{ fontSize: 13, color: T.textMuted }}>{fmt(dailyBudget)}</div>
                   </div>
                 </div>
