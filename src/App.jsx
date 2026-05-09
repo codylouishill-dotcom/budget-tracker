@@ -403,9 +403,11 @@ export default function App() {
                       style={inputStyle({ fontSize: 18, width: 90, padding: "2px 6px", textAlign: "right" })} />
                   </div>
                 ) : (
-                  <div onClick={() => { setEditBudget(true); setBudgetInput(String(budget)); }}
-                    style={{ fontSize: 20, fontWeight: 500, cursor: "pointer", borderBottom: `1px dashed ${T.border2}` }}>{fmt(budget)}</div>
-                  {recurringTarget > 0 && <div style={{ fontSize: 10, color: T.textFaint, marginTop: 2 }}>{fmt(effectiveBudget)} discretionary</div>}
+                  <>
+                    <div onClick={() => { setEditBudget(true); setBudgetInput(String(budget)); }}
+                      style={{ fontSize: 20, fontWeight: 500, cursor: "pointer", borderBottom: `1px dashed ${T.border2}` }}>{fmt(budget)}</div>
+                    {recurringTarget > 0 && <div style={{ fontSize: 10, color: T.textFaint, marginTop: 2 }}>{fmt(effectiveBudget)} discretionary</div>}
+                  </>
                 )}
               </div>
             </div>
