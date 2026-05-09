@@ -27,7 +27,6 @@ const CATEGORIES = [
   { id: "transport", label: "Transport", color: "#6A9BE8", icon: "🚗" },
   { id: "shopping", label: "Shopping", color: "#B86AE8", icon: "🛍️" },
   { id: "dining", label: "Dining Out", color: "#E8936A", icon: "🍽️" },
-  { id: "venmo", label: "Venmo", color: "#3D95CE", icon: "💸" },
   { id: "recurring", label: "Recurring", color: "#F472B6", icon: "🔄" },
   { id: "other", label: "Other", color: "#8E8E8E", icon: "📦" },
 ];
