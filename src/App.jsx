@@ -151,6 +151,9 @@ export default function App() {
   const [targetInput, setTargetInput] = useState("");
   const [expandedCats, setExpandedCats] = useState({});
   const toggleCat = (id) => setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
+  const [editingExpense, setEditingExpense] = useState(null); // { id, amount, label, category }
+  const startEdit = (e) => setEditingExpense({ id: e.id, amount: String(e.amount), label: e.label, category: e.category });
+  const cancelEdit = () => setEditingExpense(null);
   const [syncStatus, setSyncStatus] = useState("loading");
   const [syncError, setSyncError] = useState("");
   const [initialized, setInitialized] = useState(false);
@@ -267,6 +270,18 @@ export default function App() {
     setAllExpenses((prev) => prev.filter((e) => e.id !== String(id)));
     setSyncStatus("saving");
     try { await deleteExpense(String(id)); setSyncStatus("idle"); }
+    catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const saveEdit = async () => {
+    if (!editingExpense) return;
+    const amt = parseFloat(editingExpense.amount);
+    if (!amt || amt <= 0 || !editingExpense.label.trim()) return;
+    const updated = { ...allExpenses.find((e) => e.id === editingExpense.id), amount: amt, label: editingExpense.label.trim(), category: editingExpense.category };
+    setAllExpenses((prev) => prev.map((e) => e.id === editingExpense.id ? updated : e));
+    setEditingExpense(null);
+    setSyncStatus("saving");
+    try { await upsertExpense(updated); setSyncStatus("idle"); }
     catch (e) { setSyncStatus("error"); setSyncError(e.message); }
   };
 
@@ -496,21 +511,53 @@ export default function App() {
                   <div style={{ marginBottom: 12 }}>
                     {expensesByDay[selectedDay].map((e) => {
                       const cat = CATEGORIES.find((c) => c.id === e.category);
+                      const isEditing = editingExpense?.id === e.id;
                       return (
-                        <div key={e.id} className="slide-in" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${T.surface3}` }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div style={{ width: 28, height: 28, borderRadius: 6, background: `${cat.color}22`, border: `1px solid ${cat.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{cat.icon}</div>
-                            <div>
-                              <div style={{ fontSize: 13 }}>{e.label}</div>
-                              <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
-                                {cat.label}{excludedCats[cat.id] && <span style={{ marginLeft: 6, color: T.textFaint }}>· excluded</span>}
+                        <div key={e.id} className="slide-in" style={{ borderBottom: `1px solid ${T.surface3}` }}>
+                          {/* Row */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{ width: 28, height: 28, borderRadius: 6, background: `${cat.color}22`, border: `1px solid ${cat.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{cat.icon}</div>
+                              <div>
+                                <div style={{ fontSize: 13 }}>{e.label}</div>
+                                <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
+                                  {cat.label}{excludedCats[cat.id] && <span style={{ marginLeft: 6, color: T.textFaint }}>· excluded</span>}
+                                </div>
                               </div>
                             </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ fontSize: 14, fontWeight: 500, opacity: excludedCats[cat.id] ? 0.5 : 1 }}>{fmt(parseFloat(e.amount))}</div>
+                              <button className="btn" onClick={() => isEditing ? cancelEdit() : startEdit(e)}
+                                style={{ background: isEditing ? T.surface3 : "none", border: isEditing ? `1px solid ${T.border}` : "none", borderRadius: 6, color: isEditing ? T.accent : T.textDim, fontSize: 11, padding: "2px 7px", fontFamily: "inherit" }}>
+                                {isEditing ? "cancel" : "edit"}
+                              </button>
+                              <button className="btn" onClick={() => removeExpense(e.id)} style={{ background: "none", color: T.textDim, fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                            </div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <div style={{ fontSize: 14, fontWeight: 500, opacity: excludedCats[cat.id] ? 0.5 : 1 }}>{fmt(parseFloat(e.amount))}</div>
-                            <button className="btn" onClick={() => removeExpense(e.id)} style={{ background: "none", color: T.textDim, fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
-                          </div>
+                          {/* Inline edit panel */}
+                          {isEditing && (
+                            <div style={{ background: T.surface2, borderRadius: 10, padding: 14, marginBottom: 10 }}>
+                              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                                <input type="number" value={editingExpense.amount} onChange={(e) => setEditingExpense((prev) => ({ ...prev, amount: e.target.value }))}
+                                  style={{ flex: "0 0 90px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 10px", fontFamily: "inherit", outline: "none" }} />
+                                <input type="text" value={editingExpense.label} onChange={(e) => setEditingExpense((prev) => ({ ...prev, label: e.target.value }))}
+                                  onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                                  style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 10px", fontFamily: "inherit", outline: "none" }} />
+                              </div>
+                              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                                {CATEGORIES.map((c) => (
+                                  <button key={c.id} className="btn" onClick={() => setEditingExpense((prev) => ({ ...prev, category: c.id }))}
+                                    style={{ padding: "3px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: editingExpense.category === c.id ? `${c.color}33` : T.surface3, border: `1px solid ${editingExpense.category === c.id ? c.color : T.border}`, color: editingExpense.category === c.id ? c.color : T.textMuted }}>
+                                    {c.icon} {c.label}
+                                  </button>
+                                ))}
+                              </div>
+                              <button className="btn" onClick={saveEdit}
+                                style={{ width: "100%", background: T.accent, color: "#fff", borderRadius: 8, padding: "9px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.1em" }}>
+                                SAVE CHANGES
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
