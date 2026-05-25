@@ -751,28 +751,48 @@ export default function App() {
               <div style={{ fontSize: 12, color: T.textDim }}>Track spending toward special goals. Doesn't affect your monthly budget.</div>
 
               {/* All-funds summary */}
-              {funds.length > 0 && (() => {
+              {(() => {
                 const allTx = fundTransactions;
-                const totalSpent = allTx.reduce((s, t) => s + parseFloat(t.amount), 0);
-                const ytdSpent = allTx.filter((t) => t.date.startsWith(String(new Date().getFullYear()))).reduce((s, t) => s + parseFloat(t.amount), 0);
+                const curMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
+                const fundsTotalSpent = allTx.reduce((s, t) => s + parseFloat(t.amount), 0);
+                const fundsThisMonth = allTx.filter((t) => monthKey(t.date) === curMonthKey).reduce((s, t) => s + parseFloat(t.amount), 0);
                 const totalTarget = funds.filter((f) => f.target != null).reduce((s, f) => s + parseFloat(f.target), 0);
+                const budgetThisMonth = expenses.reduce((s, e) => s + parseFloat(e.amount), 0);
+                const combinedThisMonth = fundsThisMonth + budgetThisMonth;
                 return (
-                  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    {[
-                      { label: "TOTAL SPENT", value: fmt(totalSpent) },
-                      { label: "YTD SPENT", value: fmt(ytdSpent) },
-                      { label: "TOTAL TARGET", value: totalTarget > 0 ? fmt(totalTarget) : "—" },
-                    ].map((s) => (
-                      <div key={s.label}>
-                        <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>{s.label}</div>
-                        <div style={{ fontSize: 14, fontWeight: 500 }}>{s.value}</div>
+                  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
+                    <div style={{ fontSize: 9, letterSpacing: "0.12em", color: T.textDim, marginBottom: 10 }}>THIS MONTH — ALL SPENDING</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                      <div style={{ background: T.surface2, borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>BUDGET SPENDING</div>
+                        <div style={{ fontSize: 16, fontWeight: 500 }}>{fmt(budgetThisMonth)}</div>
                       </div>
-                    ))}
+                      <div style={{ background: T.surface2, borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>FUNDS SPENDING</div>
+                        <div style={{ fontSize: 16, fontWeight: 500 }}>{fmt(fundsThisMonth)}</div>
+                      </div>
+                    </div>
+                    <div style={{ background: T.surface3, borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ fontSize: 10, letterSpacing: "0.1em", color: T.textDim }}>TOTAL OUT OF POCKET</div>
+                      <div style={{ fontSize: 18, fontWeight: 500, color: T.accent }}>{fmt(combinedThisMonth)}</div>
+                    </div>
+                    {funds.length > 0 && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>FUNDS TOTAL</div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{fmt(fundsTotalSpent)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>FUNDS TARGET</div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{totalTarget > 0 ? fmt(totalTarget) : "—"}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
 
-              {funds.map((fund) => {
+              {[...funds].sort((a, b) => { const spentA = fundTransactions.filter((t) => t.fund_id === a.id).reduce((s, t) => s + parseFloat(t.amount), 0); const spentB = fundTransactions.filter((t) => t.fund_id === b.id).reduce((s, t) => s + parseFloat(t.amount), 0); return spentB - spentA; }).map((fund) => {
                 const txs = fundTransactions.filter((t) => t.fund_id === fund.id).sort((a, b) => new Date(b.date) - new Date(a.date));
                 const spent = txs.reduce((s, t) => s + parseFloat(t.amount), 0);
                 const target = fund.target != null ? parseFloat(fund.target) : null;
@@ -983,11 +1003,12 @@ export default function App() {
 
               <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16 }}>
                 <div style={{ fontSize: 9, letterSpacing: "0.12em", color: T.textDim, marginBottom: 14 }}>BY CATEGORY</div>
-                {CATEGORIES.map((cat) => {
+                {[...CATEGORIES].sort((a, b) => { const netA = getCatData(a.id).net; const netB = getCatData(b.id).net; return netB - netA; }).map((cat) => {
                   const { net, target, pct: catPct, status } = getCatData(cat.id);
                   if (net === 0 && target === 0) return null;
                   const isExcluded = !!excludedCats[cat.id];
                   const barPct = target > 0 ? catPct : (total > 0 ? (Math.max(net,0) / total) * 100 : 0);
+                  const pctOfTotal = totalIncExcluded !== 0 ? Math.abs((net / totalIncExcluded) * 100) : 0;
                   const catExpenses = expenses.filter((e) => e.category === cat.id).sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount)));
                   const isExpanded = expandedCats[`summary_${cat.id}`];
                   return (
@@ -999,6 +1020,7 @@ export default function App() {
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           {status && !isExcluded && statusBadge(status)}
+                          {pctOfTotal > 0 && <span style={{ fontSize: 10, color: T.textFaint }}>{pctOfTotal.toFixed(0)}%</span>}
                           <span style={{ fontSize: 12, color: net <= 0 ? "#6AE89B" : cat.color }}>{net <= 0 ? `+${fmt(Math.abs(net))}` : fmt(net)}{target > 0 ? ` / ${fmt(target)}` : ""}</span>
                         </div>
                       </div>
