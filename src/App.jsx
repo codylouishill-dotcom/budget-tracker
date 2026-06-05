@@ -119,7 +119,7 @@ export default function App() {
   const [allExpenses, setAllExpenses] = useState([]);
   const [selectedDay, setSelectedDay] = useState(0);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ amount: "", label: "", category: "groceries", isCredit: false });
+  const [form, setForm] = useState({ amount: "", label: "", category: "groceries", isCredit: false, fund_id: null });
   const [activeTab, setActiveTab] = useState("calendar");
   const [catTargets, setCatTargets] = useState({});
   const [excludedCats, setExcludedCats] = useState({});
@@ -149,7 +149,7 @@ export default function App() {
   // Quick Add
   const toDateInput = (d) => d.toISOString().slice(0,10);
   const fromDateInput = (s) => new Date(s + "T00:00:00");
-  const emptyRow = () => ({ amount: "", label: "", category: "groceries", date: toDateInput(todayDate), isCredit: false });
+  const emptyRow = () => ({ amount: "", label: "", category: "groceries", date: toDateInput(todayDate), isCredit: false, fund_id: null });
   const [rows, setRows] = useState(() => Array.from({ length: 5 }, emptyRow));
   const [isSavingAll, setIsSavingAll] = useState(false);
 
@@ -231,9 +231,9 @@ export default function App() {
     const amt = parseFloat(form.amount);
     if (!amt || amt <= 0 || !form.label.trim()) return;
     const finalAmt = form.isCredit ? -amt : amt;
-    const exp = { id: String(Date.now()), date: days[selectedDay].toDateString(), amount: finalAmt, label: form.label.trim(), category: form.category, period: curPeriodKey };
+    const exp = { id: String(Date.now()), date: days[selectedDay].toDateString(), amount: finalAmt, label: form.label.trim(), category: form.category, period: curPeriodKey, fund_id: form.fund_id || null };
     setAllExpenses((prev) => [...prev, exp]);
-    setForm({ amount: "", label: "", category: "groceries", isCredit: false });
+    setForm({ amount: "", label: "", category: "groceries", isCredit: false, fund_id: null });
     setShowForm(false);
     setSyncStatus("saving");
     try { await upsertExpense(exp); setSyncStatus("idle"); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
@@ -286,7 +286,7 @@ export default function App() {
     if (valid.length === 0) return;
     setIsSavingAll(true); setSyncStatus("saving");
     try {
-      const toSave = valid.map((r) => ({ id: String(Date.now() + Math.random()), date: (r.date ? fromDateInput(r.date) : todayDate).toDateString(), amount: r.isCredit ? -parseFloat(r.amount) : parseFloat(r.amount), label: r.label.trim(), category: r.category || "other", period: curPeriodKey }));
+      const toSave = valid.map((r) => ({ id: String(Date.now() + Math.random()), date: (r.date ? fromDateInput(r.date) : todayDate).toDateString(), amount: r.isCredit ? -parseFloat(r.amount) : parseFloat(r.amount), label: r.label.trim(), category: r.category || "other", period: curPeriodKey, fund_id: r.fund_id || null }));
       await Promise.all(toSave.map(upsertExpense));
       setAllExpenses((prev) => [...prev, ...toSave]);
       setRows(Array.from({ length: 5 }, emptyRow));
@@ -513,7 +513,12 @@ export default function App() {
                               <div style={{ width: 32, height: 32, borderRadius: 8, background: `${cat.color}22`, border: `1px solid ${cat.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{cat.icon}</div>
                               <div style={{ minWidth: 0 }}>
                                 <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
-                                <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>{cat.label}{isCredit && <span style={{ marginLeft: 6, color: "#6AE89B" }}>· credit</span>}{excludedCats[cat.id] && <span style={{ marginLeft: 6, color: T.textFaint }}>· excl.</span>}</div>
+                                <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
+                                {cat.label}
+                                {isCredit && <span style={{ marginLeft: 6, color: "#6AE89B" }}>· credit</span>}
+                                {excludedCats[cat.id] && <span style={{ marginLeft: 6, color: T.textFaint }}>· excl.</span>}
+                                {e.fund_id && (() => { const f = funds.find((f) => f.id === e.fund_id); return f ? <span style={{ marginLeft: 6, color: T.accent }}>· {f.icon} {f.name}</span> : null; })()}
+                              </div>
                               </div>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -570,6 +575,23 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    {funds.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 9, letterSpacing: "0.1em", color: T.textDim, marginBottom: 6 }}>TAG TO FUND (OPTIONAL)</div>
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                          <button className="btn" onClick={() => setForm({ ...form, fund_id: null })}
+                            style={{ padding: "5px 10px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: !form.fund_id ? T.accent+"33" : T.surface3, border: `1px solid ${!form.fund_id ? T.accent : T.border}`, color: !form.fund_id ? T.accent : T.textMuted }}>
+                            None
+                          </button>
+                          {funds.map((f) => (
+                            <button key={f.id} className="btn" onClick={() => setForm({ ...form, fund_id: form.fund_id === f.id ? null : f.id })}
+                              style={{ padding: "5px 10px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: form.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${form.fund_id === f.id ? T.accent : T.border}`, color: form.fund_id === f.id ? T.accent : T.textMuted }}>
+                              {f.icon} {f.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 8 }}>
                       <CreditToggle value={form.isCredit} onChange={(v) => setForm({ ...form, isCredit: v })} />
                       <button className="btn" onClick={addExpense} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "11px", fontSize: 13, fontWeight: 500, fontFamily: "inherit" }}>ADD</button>
@@ -611,7 +633,7 @@ export default function App() {
                           style={{ flex: 1, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 14, padding: "8px 10px", fontFamily: "inherit", outline: "none" }} />
                         <CreditToggle value={row.isCredit} onChange={(v) => updateRow(i, "isCredit", v)} />
                       </div>
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
                         {CATEGORIES.map((c) => (
                           <button key={c.id} className="btn" onClick={() => updateRow(i, "category", c.id)}
                             style={{ padding: "5px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: row.category === c.id ? `${c.color}33` : T.surface2, border: `1px solid ${row.category === c.id ? c.color : T.border}`, color: row.category === c.id ? c.color : T.textDim }}>
@@ -619,6 +641,21 @@ export default function App() {
                           </button>
                         ))}
                       </div>
+                      {funds.length > 0 && (
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ fontSize: 9, color: T.textFaint, letterSpacing: "0.08em" }}>FUND:</span>
+                          <button className="btn" onClick={() => updateRow(i, "fund_id", null)}
+                            style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: !row.fund_id ? T.accent+"33" : T.surface3, border: `1px solid ${!row.fund_id ? T.accent : T.border}`, color: !row.fund_id ? T.accent : T.textFaint }}>
+                            None
+                          </button>
+                          {funds.map((f) => (
+                            <button key={f.id} className="btn" onClick={() => updateRow(i, "fund_id", row.fund_id === f.id ? null : f.id)}
+                              style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${row.fund_id === f.id ? T.accent : T.border}`, color: row.fund_id === f.id ? T.accent : T.textFaint }}>
+                              {f.icon} {f.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -755,10 +792,14 @@ export default function App() {
                 const allTx = fundTransactions;
                 const curMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
                 const fundsTotalSpent = allTx.reduce((s, t) => s + parseFloat(t.amount), 0);
-                const fundsThisMonth = allTx.filter((t) => monthKey(t.date) === curMonthKey).reduce((s, t) => s + parseFloat(t.amount), 0);
+                const fundsOnlyThisMonth = allTx.filter((t) => monthKey(t.date) === curMonthKey).reduce((s, t) => s + parseFloat(t.amount), 0);
                 const totalTarget = funds.filter((f) => f.target != null).reduce((s, f) => s + parseFloat(f.target), 0);
+                // Budget spending this month (fund-tagged budget expenses already included here, not double-counted)
                 const budgetThisMonth = expenses.reduce((s, e) => s + parseFloat(e.amount), 0);
-                const combinedThisMonth = fundsThisMonth + budgetThisMonth;
+                // Combined: budget spending + fund-only transactions (no overlap)
+                const combinedThisMonth = budgetThisMonth + fundsOnlyThisMonth;
+                // Fund-tagged budget expenses this month (for context)
+                const taggedThisMonth = expenses.filter((e) => e.fund_id).reduce((s, e) => s + parseFloat(e.amount), 0);
                 return (
                   <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
                     <div style={{ fontSize: 9, letterSpacing: "0.12em", color: T.textDim, marginBottom: 10 }}>THIS MONTH — ALL SPENDING</div>
@@ -766,10 +807,11 @@ export default function App() {
                       <div style={{ background: T.surface2, borderRadius: 8, padding: "10px 12px" }}>
                         <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>BUDGET SPENDING</div>
                         <div style={{ fontSize: 16, fontWeight: 500 }}>{fmt(budgetThisMonth)}</div>
+                        {taggedThisMonth > 0 && <div style={{ fontSize: 9, color: T.textFaint, marginTop: 2 }}>{fmt(taggedThisMonth)} fund-tagged</div>}
                       </div>
                       <div style={{ background: T.surface2, borderRadius: 8, padding: "10px 12px" }}>
-                        <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>FUNDS SPENDING</div>
-                        <div style={{ fontSize: 16, fontWeight: 500 }}>{fmt(fundsThisMonth)}</div>
+                        <div style={{ fontSize: 8, letterSpacing: "0.12em", color: T.textDim, marginBottom: 3 }}>FUNDS-ONLY</div>
+                        <div style={{ fontSize: 16, fontWeight: 500 }}>{fmt(fundsOnlyThisMonth)}</div>
                       </div>
                     </div>
                     <div style={{ background: T.surface3, borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -881,6 +923,41 @@ export default function App() {
                         ) : (
                           <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 10 }}>Total spent: <span style={{ color: T.text, fontWeight: 500 }}>{fmt(spent)}</span></div>
                         )}
+
+                        {/* Fund-tagged budget expenses */}
+                        {(() => {
+                          const taggedExps = allExpenses.filter((e) => e.fund_id === fund.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+                          if (taggedExps.length === 0) return null;
+                          const taggedTotal = taggedExps.reduce((s, e) => s + parseFloat(e.amount), 0);
+                          return (
+                            <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, marginBottom: 10 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                <div style={{ fontSize: 9, letterSpacing: "0.1em", color: T.textDim }}>BUDGET TRANSACTIONS TAGGED HERE</div>
+                                <div style={{ fontSize: 12, fontWeight: 500, color: T.accent }}>{fmt(taggedTotal)}</div>
+                              </div>
+                              {taggedExps.map((e) => {
+                                const cat = CATEGORIES.find((c) => c.id === e.category);
+                                const isCredit = parseFloat(e.amount) < 0;
+                                return (
+                                  <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.surface3}` }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                      <span style={{ fontSize: 13 }}>{cat.icon}</span>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
+                                        <div style={{ fontSize: 9, color: T.textDim, marginTop: 1 }}>{cat.label} · {new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                                      </div>
+                                    </div>
+                                    <div style={{ fontSize: 12, fontWeight: 500, color: isCredit ? "#6AE89B" : T.textMuted, flexShrink: 0, marginLeft: 8 }}>{isCredit ? `+${fmt(Math.abs(parseFloat(e.amount)))}` : fmt(parseFloat(e.amount))}</div>
+                                  </div>
+                                );
+                              })}
+                              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, fontSize: 11, color: T.textDim }}>
+                                <span>Combined fund total</span>
+                                <span style={{ color: T.text, fontWeight: 500 }}>{fmt(spent + taggedTotal)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Add transaction */}
                         {isAddingTx ? (
