@@ -116,6 +116,7 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
   };
 
   const updateRow = (id, field, value) => setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
+  const hasFunds = funds && funds.length > 0;
 
   const handleImport = async () => {
     const toImport = rows.filter((r) => r.include);
@@ -128,6 +129,7 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
         date: r.date,
         amount: r.amount,
         label: r.desc,
+        fund_id: r.fund_id || null,
         category: r.category,
         period: curPeriodKey,
         fund_id: null,
@@ -236,15 +238,32 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
                     <div style={{ flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text }}>{row.desc}</div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: isCredit ? "#6AE89B" : T.text, flexShrink: 0 }}>{isCredit ? `+${fmt(Math.abs(row.amount))}` : fmt(row.amount)}</div>
                   </div>
-                  {/* Category pills */}
+                  {/* Category pills + fund tag */}
                   {row.include && (
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8, paddingLeft: 28 }}>
-                      {CATEGORIES.map((c) => (
-                        <button key={c.id} className="btn" onClick={() => updateRow(row.id, "category", c.id)}
-                          style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.category === c.id ? `${c.color}33` : T.surface2, border: `1px solid ${row.category === c.id ? c.color : T.border}`, color: row.category === c.id ? c.color : T.textDim }}>
-                          {c.icon} {c.label}
-                        </button>
-                      ))}
+                    <div style={{ paddingLeft: 28, marginTop: 8 }}>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: hasFunds ? 6 : 0 }}>
+                        {CATEGORIES.map((c) => (
+                          <button key={c.id} className="btn" onClick={() => updateRow(row.id, "category", c.id)}
+                            style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.category === c.id ? `${c.color}33` : T.surface2, border: `1px solid ${row.category === c.id ? c.color : T.border}`, color: row.category === c.id ? c.color : T.textDim }}>
+                            {c.icon} {c.label}
+                          </button>
+                        ))}
+                      </div>
+                      {hasFunds && (
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ fontSize: 9, color: T.textFaint, letterSpacing: "0.08em" }}>FUND:</span>
+                          <button className="btn" onClick={() => updateRow(row.id, "fund_id", null)}
+                            style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: !row.fund_id ? T.accent+"33" : T.surface2, border: `1px solid ${!row.fund_id ? T.accent : T.border}`, color: !row.fund_id ? T.accent : T.textFaint }}>
+                            None
+                          </button>
+                          {funds.map((f) => (
+                            <button key={f.id} className="btn" onClick={() => updateRow(row.id, "fund_id", row.fund_id === f.id ? null : f.id)}
+                              style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.fund_id === f.id ? T.accent+"33" : T.surface2, border: `1px solid ${row.fund_id === f.id ? T.accent : T.border}`, color: row.fund_id === f.id ? T.accent : T.textFaint }}>
+                              {f.icon} {f.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -308,7 +327,7 @@ export default function App() {
   const [expandedCats, setExpandedCats] = useState({});
   const toggleCat = (id) => setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
   const [editingExpense, setEditingExpense] = useState(null);
-  const startEdit = (e) => setEditingExpense({ id: e.id, amount: String(Math.abs(parseFloat(e.amount))), label: e.label, category: e.category, isCredit: parseFloat(e.amount) < 0 });
+  const startEdit = (e) => setEditingExpense({ id: e.id, amount: String(Math.abs(parseFloat(e.amount))), label: e.label, category: e.category, isCredit: parseFloat(e.amount) < 0, fund_id: e.fund_id || null });
   const cancelEdit = () => setEditingExpense(null);
 
   // Funds
@@ -437,7 +456,7 @@ export default function App() {
     const amt = parseFloat(editingExpense.amount);
     if (!amt || amt <= 0 || !editingExpense.label.trim()) return;
     const finalAmt = editingExpense.isCredit ? -amt : amt;
-    const updated = { ...allExpenses.find((e) => e.id === editingExpense.id), amount: finalAmt, label: editingExpense.label.trim(), category: editingExpense.category };
+    const updated = { ...allExpenses.find((e) => e.id === editingExpense.id), amount: finalAmt, label: editingExpense.label.trim(), category: editingExpense.category, fund_id: editingExpense.fund_id || null };
     setAllExpenses((prev) => prev.map((e) => e.id === editingExpense.id ? updated : e));
     setEditingExpense(null);
     setSyncStatus("saving");
@@ -733,6 +752,23 @@ export default function App() {
                                   </button>
                                 ))}
                               </div>
+                              {funds.length > 0 && (
+                                <div style={{ marginBottom: 10 }}>
+                                  <div style={{ fontSize: 9, letterSpacing: "0.1em", color: T.textDim, marginBottom: 5 }}>TAG TO FUND</div>
+                                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                    <button className="btn" onClick={() => setEditingExpense((p) => ({ ...p, fund_id: null }))}
+                                      style={{ padding: "4px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: !editingExpense.fund_id ? T.accent+"33" : T.surface3, border: `1px solid ${!editingExpense.fund_id ? T.accent : T.border}`, color: !editingExpense.fund_id ? T.accent : T.textMuted }}>
+                                      None
+                                    </button>
+                                    {funds.map((f) => (
+                                      <button key={f.id} className="btn" onClick={() => setEditingExpense((p) => ({ ...p, fund_id: p.fund_id === f.id ? null : f.id }))}
+                                        style={{ padding: "4px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: editingExpense.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${editingExpense.fund_id === f.id ? T.accent : T.border}`, color: editingExpense.fund_id === f.id ? T.accent : T.textMuted }}>
+                                        {f.icon} {f.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                               <div style={{ display: "flex", gap: 8 }}>
                                 <CreditToggle value={editingExpense.isCredit} onChange={(v) => setEditingExpense((p) => ({ ...p, isCredit: v }))} />
                                 <button className="btn" onClick={saveEdit} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 500, fontFamily: "inherit" }}>SAVE</button>
