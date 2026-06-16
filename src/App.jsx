@@ -673,7 +673,7 @@ export default function App() {
                   );
                 })}
               </div>
-            </div>{/* end calendar grid col */}
+            </div>
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16 }}>
@@ -795,8 +795,8 @@ export default function App() {
                   </button>
                 )}
               </div>
-            </div>{/* end day panel col */}
-            </div>{/* end calendar desktop row */}
+            </div>
+            </div>
           )}
 
           {/* ── QUICK ADD ── */}
@@ -1221,7 +1221,7 @@ export default function App() {
                 );
               })}
 
-              </div>{/* end funds grid */}
+              </div>
               {showNewFund ? (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16 }}>
                   <div style={{ fontSize: 10, letterSpacing: "0.1em", color: T.textDim, marginBottom: 12 }}>NEW FUND</div>
