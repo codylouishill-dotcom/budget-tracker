@@ -16,6 +16,7 @@ const sb = async (path, method = "GET", body = null) => {
 };
 
 const loadExpensesForPeriods = (keys) => sb(`/expenses?period=in.(${keys.map(k => `"${k}"`).join(",")})&order=created_at.asc`);
+const loadAllExpenses = () => sb("/expenses?order=created_at.asc");
 const upsertExpense = (exp) => sb("/expenses", "POST", exp);
 const deleteExpense = (id) => sb(`/expenses?id=eq.${id}`, "DELETE");
 const loadSettings = () => sb("/settings?select=key,value");
@@ -98,6 +99,176 @@ const periodKey = (start, mode) => mode === "monthly"
   ? `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,"0")}`
   : start.toISOString().slice(0,10);
 
+// ── ImportTab Component ──────────────────────────────────────────────────────
+function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPeriodKey, funds, periodStart, periodEnd, T, iStyle, fmt, CATEGORIES, setSyncStatus, setSyncError }) {
+  const [csvText, setCsvText] = useState("");
+  const [parsed, setParsed] = useState(null); // { format, rows, error }
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState(false);
+  const [rows, setRows] = useState([]);
+
+  const handleParse = () => {
+    if (!csvText.trim()) return;
+    const result = parseCSV(csvText);
+    setParsed(result);
+    if (!result.error) setRows(result.rows.map((r) => ({ ...r })));
+    setImported(false);
+  };
+
+  const updateRow = (id, field, value) => setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
+
+  const handleImport = async () => {
+    const toImport = rows.filter((r) => r.include);
+    if (toImport.length === 0) return;
+    setImporting(true);
+    setSyncStatus("saving");
+    try {
+      const exps = toImport.map((r) => ({
+        id: String(Date.now() + Math.random()),
+        date: r.date,
+        amount: r.amount,
+        label: r.desc,
+        category: r.category,
+        period: curPeriodKey,
+        fund_id: null,
+      }));
+      await Promise.all(exps.map(upsertExpense));
+      setAllExpenses((prev) => [...prev, ...exps.filter((e) => {
+        const d = new Date(e.date); d.setHours(0,0,0,0);
+        return d >= periodStart && d <= periodEnd;
+      })]);
+      setSyncStatus("idle");
+      setImported(true);
+      setCsvText("");
+      setParsed(null);
+      setRows([]);
+    } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+    setImporting(false);
+  };
+
+  const includedCount = rows.filter((r) => r.include).length;
+  const includedTotal = rows.filter((r) => r.include && r.amount > 0).reduce((s, r) => s + r.amount, 0);
+
+  const FORMAT_LABELS = {
+    chase_card: "Chase Credit Card",
+    chase_checking: "Chase Checking",
+    cu: "Credit Union",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 12, color: T.textDim }}>Paste CSV text from your bank export. Supports Chase credit card, Chase checking, and Credit Union formats.</div>
+
+      {imported && (
+        <div style={{ background: "#6AE89B22", border: "1px solid #6AE89B55", borderRadius: 10, padding: 14, fontSize: 13, color: "#6AE89B", textAlign: "center" }}>
+          ✓ Import complete!
+        </div>
+      )}
+
+      {/* Paste area */}
+      {!parsed && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 9, letterSpacing: "0.12em", color: T.textDim, marginBottom: 8 }}>PASTE CSV DATA</div>
+          <textarea
+            value={csvText}
+            onChange={(e) => setCsvText(e.target.value)}
+            placeholder={"Paste your bank CSV here...\n\nTransaction Date,Post Date,Description,Category,Type,Amount,Memo\n12/01/2025,..."}
+            style={{ width: "100%", minHeight: 140, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: "inherit", padding: "10px 12px", outline: "none", resize: "vertical" }}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button className="btn" onClick={handleParse} disabled={!csvText.trim()}
+              style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "12px", fontSize: 13, fontWeight: 500, fontFamily: "inherit", opacity: !csvText.trim() ? 0.5 : 1 }}>
+              PARSE CSV
+            </button>
+            <button className="btn" onClick={() => setCsvText("")}
+              style={{ padding: "12px 14px", background: T.surface2, border: `1px solid ${T.border}`, color: T.textMuted, borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {parsed?.error && (
+        <div style={{ background: "#E86A6A11", border: "1px solid #E86A6A44", borderRadius: 10, padding: 14 }}>
+          <div style={{ fontSize: 12, color: "#E86A6A", marginBottom: 8 }}>⚠ Could not parse CSV</div>
+          <div style={{ fontSize: 11, color: T.textMuted }}>{parsed.error}</div>
+          <button className="btn" onClick={() => { setParsed(null); }} style={{ marginTop: 10, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, color: T.textMuted, fontFamily: "inherit" }}>Try again</button>
+        </div>
+      )}
+
+      {/* Preview */}
+      {parsed && !parsed.error && rows.length > 0 && (
+        <>
+          {/* Format + stats bar */}
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 10, color: T.textDim, marginBottom: 2 }}>DETECTED: <span style={{ color: T.accent }}>{FORMAT_LABELS[parsed.format]}</span></div>
+              <div style={{ fontSize: 12 }}>{includedCount} of {rows.length} transactions · {fmt(includedTotal)}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn" onClick={() => setRows((p) => p.map((r) => ({ ...r, include: true })))}
+                style={{ fontSize: 11, color: T.textDim, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 9px", fontFamily: "inherit" }}>All</button>
+              <button className="btn" onClick={() => setRows((p) => p.map((r) => ({ ...r, include: false })))}
+                style={{ fontSize: 11, color: T.textDim, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 9px", fontFamily: "inherit" }}>None</button>
+              <button className="btn" onClick={() => { setParsed(null); setCsvText(""); setRows([]); }}
+                style={{ fontSize: 11, color: T.textDim, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 9px", fontFamily: "inherit" }}>← Back</button>
+            </div>
+          </div>
+
+          {/* Transaction rows */}
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+            {rows.map((row) => {
+              const cat = CATEGORIES.find((c) => c.id === row.category);
+              const dateStr = new Date(row.date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+              const isCredit = row.amount < 0;
+              return (
+                <div key={row.id} style={{ borderBottom: `1px solid ${T.border}`, padding: "10px 14px", opacity: row.include ? 1 : 0.4 }}>
+                  {/* Main row */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button className="btn" onClick={() => updateRow(row.id, "include", !row.include)}
+                      style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${row.include ? T.accent : T.border}`, background: row.include ? T.accent : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {row.include && <span style={{ color: "#fff", fontSize: 11, lineHeight: 1 }}>✓</span>}
+                    </button>
+                    <div style={{ fontSize: 10, color: T.textFaint, flexShrink: 0, width: 36 }}>{dateStr}</div>
+                    <div style={{ flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text }}>{row.desc}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: isCredit ? "#6AE89B" : T.text, flexShrink: 0 }}>{isCredit ? `+${fmt(Math.abs(row.amount))}` : fmt(row.amount)}</div>
+                  </div>
+                  {/* Category pills */}
+                  {row.include && (
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8, paddingLeft: 28 }}>
+                      {CATEGORIES.map((c) => (
+                        <button key={c.id} className="btn" onClick={() => updateRow(row.id, "category", c.id)}
+                          style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.category === c.id ? `${c.color}33` : T.surface2, border: `1px solid ${row.category === c.id ? c.color : T.border}`, color: row.category === c.id ? c.color : T.textDim }}>
+                          {c.icon} {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Import button */}
+          <button className="btn" onClick={handleImport} disabled={importing || includedCount === 0}
+            style={{ width: "100%", background: T.accent, color: "#fff", borderRadius: 10, padding: "14px", fontSize: 14, fontWeight: 500, fontFamily: "inherit", letterSpacing: "0.08em", opacity: importing || includedCount === 0 ? 0.6 : 1 }}>
+            {importing ? "IMPORTING..." : `IMPORT ${includedCount} TRANSACTIONS`}
+          </button>
+        </>
+      )}
+
+      {parsed && !parsed.error && rows.length === 0 && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 16, textAlign: "center", color: T.textMuted, fontSize: 12 }}>
+          No importable transactions found — payments and transfers are automatically excluded.
+          <br /><br />
+          <button className="btn" onClick={() => { setParsed(null); setCsvText(""); }} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 12, color: T.textMuted, fontFamily: "inherit" }}>Try again</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const todayDate = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
@@ -141,6 +312,13 @@ export default function App() {
   const [activeFundId, setActiveFundId] = useState(null);
   const [fundTxForm, setFundTxForm] = useState({ amount: "", label: "", date: "", isCredit: false });
   const [editingFund, setEditingFund] = useState(null);
+
+  // History
+  const [historyExpenses, setHistoryExpenses] = useState([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [expandedMonths, setExpandedMonths] = useState({});
+  const toggleMonth = (key) => setExpandedMonths((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const [syncStatus, setSyncStatus] = useState("loading");
   const [syncError, setSyncError] = useState("");
@@ -441,7 +619,7 @@ export default function App() {
         {/* STICKY TABS */}
         <div style={{ maxWidth: 480, margin: "0 auto", borderTop: `1px solid ${T.border}`, marginTop: 12 }}>
           <div style={{ display: "flex", overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
-            {["calendar","quick add","categories","funds","summary"].map((tab) => (
+            {["calendar","quick add","import","categories","funds","summary","history"].map((tab) => (
               <button key={tab} className="btn" onClick={() => setActiveTab(tab)}
                 style={{ padding: "10px 12px", fontSize: 10, letterSpacing: "0.08em", color: activeTab === tab ? T.text : T.textDim, borderBottom: activeTab === tab ? `2px solid ${T.accent}` : "2px solid transparent", background: "none", fontFamily: "inherit", marginBottom: -1, whiteSpace: "nowrap", flexShrink: 0 }}>
                 {tab.toUpperCase()}
@@ -1157,6 +1335,358 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* ── IMPORT ── */}
+          {activeTab === "import" && (() => {
+            // ── CSV parsing logic ──────────────────────────────────────────
+            const parseCSV = (text) => {
+              const lines = text.trim().split(/\r?\n/);
+              if (lines.length < 2) return { error: "No data found" };
+              const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
+
+              // Detect format
+              const has = (name) => headers.some((h) => h.includes(name));
+              let format = null;
+              if (has("transaction date") && has("post date") && has("type") && has("amount")) format = "chase_card";
+              else if (has("details") && has("posting date") && has("balance")) format = "chase_checking";
+              else if (has("status") && has("date") && has("debit") && has("credit")) format = "cu"; // credit union (both variants)
+              else return { error: `Unrecognized format. Headers found: ${headers.join(", ")}` };
+
+              // Category keyword rules
+              const categorize = (desc) => {
+                const d = desc.toUpperCase();
+                if (/COSTCO|WM\s?SUPERCENTER|WALMART|STOKES|SMITH.S|KROGER|TRADER JOE|WHOLE FOOD|WINCO|HARMON|MACEYS|SPROUTS|ALDI|SAFEWAY|FRESH FOOD|FROSTOP|BROULIMS/.test(d)) return "groceries";
+                if (/MCDONALD|CHICK.FIL|SUBWAY|WENDY|BURGER|TACO|PIZZA|CAFE|PANERA|STARBUCKS|DUTCH.BROS|SONIC|OLIVE.GARDEN|TEXAS.ROAD|RED.ROBIN|APPLEBEE|IHOP|DENNY|WAFFLE|SWIG|KNEADERS|CAFE.RIO|ZUPAS|CUBBY|CINNABON|JAMBA|TROPICAL|PANDA|RAISING|IN-N-OUT|CULVER|SHAKE.SHACK|FIVE.GUYS|SMASH|CRUMBL|SILL|NIELSEN.S|HOP/.test(d)) return "dining";
+                if (/CHEVRON|SHELL|MAVERIK|MAVERICK|EXXON|MOBIL|SINCLAIR|PHILLIPS|PILOT|LOVE.S.TRAVEL|FUEL|GAS.STATION|AUTOZONE|JIFFY.LUBE|FIRESTONE|VALVOLINE|NAPA.AUTO|PEP.BOYS|O.REILLY|UBER|LYFT|DISCOUNT.TIRE/.test(d)) return "transport";
+                if (/NETFLIX|HULU|DISNEY|SPOTIFY|APPLE.COM\/BILL|GOOGLE.*STOR|AMAZON.PRIME|AUDIBLE|YOUTUBE|SLING|HBO|PARAMOUNT|PEACOCK|VIVINT|ADT|PLANET.FITNESS|LA.FITNESS|GOLD.S.GYM|INSURANCE|ALLSTATE|STATE.FARM|GEICO|PROGRESSIVE|BLUE.CROSS|CIGNA|AT&T|VERIZON|T-MOBILE|COMCAST|XFINITY/.test(d)) return "recurring";
+                if (/AMAZON|NIKE|TARGET|NORDSTROM|MACY|KOHL|OLD.NAVY|GAP|H&M|DICK.S.SPORT|AL.S.SPORT|HOMEGOODS|TJ.MAXX|MARSHALLS|ROSS|EBAY|ETSY|WALMART(?!.*SUPER)|COSTCO(?!.*FOOD)/.test(d)) return "shopping";
+                return "other";
+              };
+
+              // Skip patterns — payments, transfers, payroll
+              const shouldSkip = (desc, type = "") => {
+                const d = desc.toUpperCase(); const t = type.toUpperCase();
+                return /PAYMENT.THANK.YOU|ONLINE.PAYMENT|AUTOPAY|BILL.PAY|MOBILE.PAY|ONLINE.TRANSFER|ACCT.XFER|LOAN.PMT/.test(d)
+                  || t === "payment" || t === "acct_xfer" || t === "loan_pmt";
+              };
+
+              const getCol = (row, name) => {
+                const idx = headers.findIndex((h) => h.includes(name));
+                return idx >= 0 ? (row[idx] || "").trim().replace(/^"|"$/g, "") : "";
+              };
+
+              const parseDate = (str) => {
+                // M/D/YYYY or MM/DD/YYYY
+                const parts = str.split("/");
+                if (parts.length === 3) return new Date(parts[2], parts[0]-1, parts[1]);
+                return new Date(str);
+              };
+
+              const rows = [];
+              for (let i = 1; i < lines.length; i++) {
+                // Handle quoted fields with commas inside
+                const row = [];
+                let cur = ""; let inQ = false;
+                for (const ch of lines[i] + ",") {
+                  if (ch === '"') { inQ = !inQ; }
+                  else if (ch === "," && !inQ) { row.push(cur.trim()); cur = ""; }
+                  else { cur += ch; }
+                }
+
+                let date, desc, amount, type = "";
+                try {
+                  if (format === "chase_card") {
+                    date = parseDate(getCol(row, "transaction date"));
+                    desc = getCol(row, "description");
+                    amount = parseFloat(getCol(row, "amount"));
+                    type = getCol(row, "type");
+                    if (shouldSkip(desc, type)) continue;
+                    if (isNaN(amount)) continue;
+                    // Chase card: negative = expense, positive = return/credit
+                    // flip sign so expenses are positive in our app
+                    amount = -amount;
+                  } else if (format === "chase_checking") {
+                    date = parseDate(getCol(row, "posting date"));
+                    desc = getCol(row, "description");
+                    amount = parseFloat(getCol(row, "amount"));
+                    type = getCol(row, "type");
+                    if (shouldSkip(desc, type)) continue;
+                    if (isNaN(amount)) continue;
+                    // checking: negative = expense, positive = income — skip income
+                    if (amount > 0) continue;
+                    amount = -amount; // flip to positive
+                  } else if (format === "cu") {
+                    date = parseDate(getCol(row, "date"));
+                    desc = getCol(row, "description");
+                    const debit = parseFloat(getCol(row, "debit")) || 0;
+                    const credit = parseFloat(getCol(row, "credit")) || 0;
+                    if (shouldSkip(desc)) continue;
+                    // Debit > 0 = expense; Credit < 0 = refund; Credit > 0 = payment (skip)
+                    if (debit > 0) { amount = debit; }
+                    else if (credit < 0) { amount = credit; } // negative = refund (credit back)
+                    else { continue; } // skip positive credits (payments)
+                  }
+                  if (!desc || !date || isNaN(amount)) continue;
+                  const dateStr = date.toDateString();
+                  rows.push({
+                    id: String(Date.now() + Math.random()),
+                    date: dateStr,
+                    dateObj: date,
+                    desc: desc.replace(/\s+/g, " ").trim(),
+                    amount,
+                    category: categorize(desc),
+                    include: true,
+                    period: periodKey(date, viewMode),
+                  });
+                } catch (e) { continue; }
+              }
+              rows.sort((a, b) => b.dateObj - a.dateObj);
+              return { format, rows, error: null };
+            };
+
+            return <ImportTab parseCSV={parseCSV} expenses={allExpenses} setAllExpenses={setAllExpenses} upsertExpense={upsertExpense} curPeriodKey={curPeriodKey} funds={funds} periodStart={periodStart} periodEnd={periodEnd} T={T} iStyle={iStyle} fmt={fmt} CATEGORIES={CATEGORIES} setSyncStatus={setSyncStatus} setSyncError={setSyncError} />;
+          })()}
+
+          {/* ── HISTORY ── */}
+          {activeTab === "history" && (() => {
+            // Load all expenses on first open
+            if (!historyLoaded && !historyLoading) {
+              setHistoryLoading(true);
+              loadAllExpenses().then((data) => {
+                setHistoryExpenses(data || []);
+                setHistoryLoaded(true);
+                setHistoryLoading(false);
+              }).catch(() => setHistoryLoading(false));
+            }
+
+            if (historyLoading) return (
+              <div style={{ textAlign: "center", color: T.textDim, fontSize: 12, padding: "40px 0" }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>⟳</div>Loading history...
+              </div>
+            );
+
+            // Build rolling 13 months
+            const now = new Date();
+            const months = [];
+            for (let i = 12; i >= 0; i--) {
+              const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+              months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+            }
+
+            // Aggregate data per month
+            const monthData = months.map((mk) => {
+              const mExps = historyExpenses.filter((e) => {
+                const d = new Date(e.date); 
+                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}` === mk;
+              });
+              const mFundTx = fundTransactions.filter((t) => monthKey(t.date) === mk);
+              const budgetSpent = mExps.reduce((s, e) => s + parseFloat(e.amount), 0);
+              const fundsOnly = mFundTx.reduce((s, t) => s + parseFloat(t.amount), 0);
+              const total = budgetSpent + fundsOnly;
+              const hasData = mExps.length > 0 || mFundTx.length > 0;
+              return { mk, budgetSpent, fundsOnly, total, hasData, exps: mExps, fundTxs: mFundTx };
+            });
+
+            const withData = monthData.filter((m) => m.hasData);
+            const avgBudget = withData.length > 0 ? withData.reduce((s, m) => s + m.budgetSpent, 0) / withData.length : 0;
+            const avgFunds = withData.length > 0 ? withData.reduce((s, m) => s + m.fundsOnly, 0) / withData.length : 0;
+            const avgTotal = withData.length > 0 ? withData.reduce((s, m) => s + m.total, 0) / withData.length : 0;
+
+            // Chart dimensions
+            const chartW = 440; const chartH = 140; const padL = 48; const padR = 12; const padT = 12; const padB = 28;
+            const innerW = chartW - padL - padR;
+            const innerH = chartH - padT - padB;
+            const allTotals = monthData.map((m) => m.total).filter((v) => v > 0);
+            const maxVal = allTotals.length > 0 ? Math.max(...allTotals) * 1.15 : 1000;
+            const xStep = innerW / (months.length - 1);
+            const yScale = (v) => padT + innerH - (v / maxVal) * innerH;
+            const xPos = (i) => padL + i * xStep;
+
+            const linePath = (getter) => monthData.map((m, i) => `${i === 0 ? "M" : "L"} ${xPos(i).toFixed(1)} ${yScale(getter(m)).toFixed(1)}`).join(" ");
+            const areaPath = (getter) => `${linePath(getter)} L ${xPos(months.length-1).toFixed(1)} ${(padT+innerH).toFixed(1)} L ${padL.toFixed(1)} ${(padT+innerH).toFixed(1)} Z`;
+
+            const curMk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+            const prevYearMk = `${now.getFullYear()-1}-${String(now.getMonth()+1).padStart(2,"0")}`;
+
+            const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map((f) => ({ val: maxVal * f, y: yScale(maxVal * f) }));
+
+            const fmtK = (n) => n >= 1000 ? `$${(n/1000).toFixed(1)}k` : `$${Math.round(n)}`;
+
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+                {/* Averages */}
+                {withData.length > 0 && (
+                  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14 }}>
+                    <div style={{ fontSize: 9, letterSpacing: "0.12em", color: T.textDim, marginBottom: 10 }}>
+                      {withData.length}-MONTH AVERAGE
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                      {[
+                        { label: "BUDGET", value: fmt(avgBudget), color: "#6A9BE8" },
+                        { label: "FUNDS-ONLY", value: fmt(avgFunds), color: "#B86AE8" },
+                        { label: "TOTAL", value: fmt(avgTotal), color: T.accent },
+                      ].map((s) => (
+                        <div key={s.label} style={{ background: T.surface2, borderRadius: 8, padding: "8px 10px" }}>
+                          <div style={{ fontSize: 8, letterSpacing: "0.1em", color: T.textDim, marginBottom: 3 }}>{s.label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: s.color }}>{s.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Line chart */}
+                {withData.length > 1 && (
+                  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 10px 10px" }}>
+                    <div style={{ fontSize: 9, letterSpacing: "0.12em", color: T.textDim, marginBottom: 8, paddingLeft: 4 }}>ROLLING 13 MONTHS</div>
+                    <div style={{ overflowX: "auto" }}>
+                      <svg width={chartW} height={chartH} style={{ display: "block", minWidth: chartW }}>
+                        {/* Grid lines */}
+                        {yTicks.map(({ val, y }) => (
+                          <g key={val}>
+                            <line x1={padL} y1={y} x2={chartW - padR} y2={y} stroke={T.border} strokeWidth={1} />
+                            <text x={padL - 4} y={y + 4} textAnchor="end" fontSize={8} fill={T.textFaint}>{fmtK(val)}</text>
+                          </g>
+                        ))}
+                        {/* Area fills */}
+                        <path d={areaPath((m) => m.budgetSpent)} fill="#6A9BE822" />
+                        <path d={areaPath((m) => m.fundsOnly)} fill="#B86AE811" />
+                        {/* Lines */}
+                        <path d={linePath((m) => m.total)} fill="none" stroke={T.accent} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+                        <path d={linePath((m) => m.budgetSpent)} fill="none" stroke="#6A9BE8" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+                        <path d={linePath((m) => m.fundsOnly)} fill="none" stroke="#B86AE8" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" strokeDasharray="4 3" />
+                        {/* Dots for current and same-month-last-year */}
+                        {monthData.map((m, i) => {
+                          const highlight = m.mk === curMk || m.mk === prevYearMk;
+                          if (!highlight && !m.hasData) return null;
+                          return (
+                            <g key={m.mk}>
+                              {m.hasData && <circle cx={xPos(i)} cy={yScale(m.total)} r={m.mk === curMk ? 5 : 3} fill={T.accent} stroke={T.surface} strokeWidth={1.5} />}
+                              {m.mk === curMk && <text x={xPos(i)} y={yScale(m.total) - 8} textAnchor="middle" fontSize={8} fill={T.accent}>NOW</text>}
+                              {m.mk === prevYearMk && m.hasData && <text x={xPos(i)} y={yScale(m.total) - 8} textAnchor="middle" fontSize={8} fill={T.textDim}>LY</text>}
+                            </g>
+                          );
+                        })}
+                        {/* X axis labels — show every 3 months */}
+                        {monthData.map((m, i) => {
+                          if (i % 3 !== 0 && m.mk !== curMk) return null;
+                          const [y, mo] = m.mk.split("-");
+                          const label = new Date(y, mo-1, 1).toLocaleDateString("en-US", { month: "short" });
+                          return <text key={m.mk} x={xPos(i)} y={chartH - 6} textAnchor="middle" fontSize={8} fill={m.mk === curMk ? T.accent : T.textFaint}>{label}</text>;
+                        })}
+                      </svg>
+                    </div>
+                    {/* Legend */}
+                    <div style={{ display: "flex", gap: 12, paddingLeft: padL, marginTop: 6 }}>
+                      {[
+                        { color: T.accent, label: "Total", dash: false },
+                        { color: "#6A9BE8", label: "Budget", dash: false },
+                        { color: "#B86AE8", label: "Funds-only", dash: true },
+                      ].map((l) => (
+                        <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <svg width={16} height={8}>
+                            <line x1={0} y1={4} x2={16} y2={4} stroke={l.color} strokeWidth={2} strokeDasharray={l.dash ? "4 2" : undefined} />
+                          </svg>
+                          <span style={{ fontSize: 9, color: T.textDim }}>{l.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Month rows */}
+                <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
+                    {["MONTH", "BUDGET", "FUNDS", "TOTAL"].map((h) => (
+                      <div key={h} style={{ fontSize: 8, letterSpacing: "0.1em", color: T.textFaint }}>{h}</div>
+                    ))}
+                  </div>
+                  {[...monthData].reverse().map((m) => {
+                    const isExpanded = expandedMonths[m.mk];
+                    const isCur = m.mk === curMk;
+                    const isPrevYear = m.mk === prevYearMk;
+                    const [y, mo] = m.mk.split("-");
+                    const label = new Date(y, mo-1, 1).toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+
+                    // Category breakdown for this month
+                    const catBreakdown = CATEGORIES.map((c) => {
+                      const catExps = m.exps.filter((e) => e.category === c.id);
+                      const catNet = catExps.reduce((s, e) => s + parseFloat(e.amount), 0);
+                      return { ...c, net: catNet, count: catExps.length };
+                    }).filter((c) => c.net !== 0).sort((a, b) => b.net - a.net);
+
+                    return (
+                      <div key={m.mk} style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <div
+                          onClick={() => m.hasData && toggleMonth(m.mk)}
+                          style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", padding: "11px 14px", alignItems: "center", cursor: m.hasData ? "pointer" : "default", background: isCur ? `${T.accent}11` : isPrevYear ? `${T.border}` : "transparent" }}>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: isCur ? 600 : 400, color: isCur ? T.accent : isPrevYear ? T.textMuted : T.text }}>{label}</div>
+                            {isCur && <div style={{ fontSize: 8, color: T.accent, letterSpacing: "0.08em" }}>CURRENT</div>}
+                            {isPrevYear && <div style={{ fontSize: 8, color: T.textFaint, letterSpacing: "0.08em" }}>LAST YR</div>}
+                          </div>
+                          <div style={{ fontSize: 12, color: m.hasData ? "#6A9BE8" : T.textFaint }}>{m.hasData ? fmt(m.budgetSpent) : "—"}</div>
+                          <div style={{ fontSize: 12, color: m.hasData ? "#B86AE8" : T.textFaint }}>{m.hasData ? fmt(m.fundsOnly) : "—"}</div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ fontSize: 12, fontWeight: 500, color: m.hasData ? T.accent : T.textFaint }}>{m.hasData ? fmt(m.total) : "—"}</div>
+                            {m.hasData && <span style={{ fontSize: 10, color: T.textDim, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>}
+                          </div>
+                        </div>
+                        {isExpanded && (
+                          <div style={{ padding: "0 14px 12px", background: T.surface2 }}>
+                            {/* Category breakdown */}
+                            {catBreakdown.length > 0 && (
+                              <div style={{ marginTop: 10 }}>
+                                <div style={{ fontSize: 8, letterSpacing: "0.1em", color: T.textDim, marginBottom: 8 }}>BY CATEGORY</div>
+                                {catBreakdown.map((c) => {
+                                  const pct = m.budgetSpent !== 0 ? Math.abs((c.net / m.budgetSpent) * 100) : 0;
+                                  return (
+                                    <div key={c.id} style={{ marginBottom: 8 }}>
+                                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                                        <span style={{ fontSize: 11 }}>{c.icon} {c.label}</span>
+                                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                          <span style={{ fontSize: 9, color: T.textFaint }}>{pct.toFixed(0)}%</span>
+                                          <span style={{ fontSize: 12, color: c.net < 0 ? "#6AE89B" : c.color }}>{c.net < 0 ? `+${fmt(Math.abs(c.net))}` : fmt(c.net)}</span>
+                                        </div>
+                                      </div>
+                                      <div style={{ height: 3, background: T.border, borderRadius: 2, overflow: "hidden" }}>
+                                        <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: c.color, borderRadius: 2 }} />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {/* Fund transactions this month */}
+                            {m.fundTxs.length > 0 && (
+                              <div style={{ marginTop: 12 }}>
+                                <div style={{ fontSize: 8, letterSpacing: "0.1em", color: T.textDim, marginBottom: 8 }}>FUNDS-ONLY TRANSACTIONS</div>
+                                {m.fundTxs.map((t) => {
+                                  const fund = funds.find((f) => f.id === t.fund_id);
+                                  return (
+                                    <div key={t.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "5px 0", borderBottom: `1px solid ${T.surface3}` }}>
+                                      <span style={{ color: T.textMuted }}>{fund ? `${fund.icon} ${fund.name}` : "Fund"} · {t.label}</span>
+                                      <span style={{ color: "#B86AE8" }}>{fmt(parseFloat(t.amount))}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {/* Totals row */}
+                            <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, marginTop: 4, borderTop: `1px solid ${T.border}` }}>
+                              <span style={{ fontSize: 11, color: T.textDim }}>Total out of pocket</span>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: T.accent }}>{fmt(m.total)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
