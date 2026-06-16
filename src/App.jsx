@@ -150,7 +150,9 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
   const includedTotal = rows.filter((r) => r.include && r.amount > 0).reduce((s, r) => s + r.amount, 0);
 
   const FORMAT_LABELS = {
-    chase_card: "Chase Credit Card",
+    chase_card: "Chase Credit Card (CSV)",
+    chase_web: "Chase Website (copy-paste)",
+    citi_web: "Citi Website (copy-paste)",
     chase_checking: "Chase Checking",
     cu: "Credit Union",
   };
@@ -272,6 +274,13 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const todayDate = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+  const [windowWidth, setWindowWidth] = useState(() => typeof window !== "undefined" ? window.innerWidth : 480);
+  useEffect(() => {
+    const handler = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  const isDesktop = windowWidth >= 768;
   const payDates = useMemo(() => getPayDates(), []);
   const [viewMode, setViewMode] = useState(() => localStorage.getItem("budgetViewMode") || "monthly");
   useEffect(() => { localStorage.setItem("budgetViewMode", viewMode); }, [viewMode]);
@@ -546,7 +555,7 @@ export default function App() {
 
       {/* HEADER */}
       <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "16px 16px 12px", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ maxWidth: isDesktop ? 960 : 480, margin: "0 auto", padding: isDesktop ? "0 12px" : "0" }}>
           {/* Top row */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div>
@@ -617,7 +626,7 @@ export default function App() {
         </div>
 
         {/* STICKY TABS */}
-        <div style={{ maxWidth: 480, margin: "0 auto", borderTop: `1px solid ${T.border}`, marginTop: 12 }}>
+        <div style={{ maxWidth: isDesktop ? 960 : 480, margin: "0 auto", borderTop: `1px solid ${T.border}`, marginTop: 12, padding: isDesktop ? "0 12px" : "0" }}>
           <div style={{ display: "flex", overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
             {["calendar","quick add","import","categories","funds","summary","history"].map((tab) => (
               <button key={tab} className="btn" onClick={() => setActiveTab(tab)}
@@ -632,15 +641,16 @@ export default function App() {
 
 
       {!initialized ? (
-        <div style={{ maxWidth: 480, margin: "80px auto", textAlign: "center", color: T.textDim, fontSize: 12 }}>
+        <div style={{ maxWidth: isDesktop ? 960 : 480, margin: "80px auto", textAlign: "center", color: T.textDim, fontSize: 12 }}>
           <div style={{ fontSize: 28, marginBottom: 12 }}>⟳</div>Loading...
         </div>
       ) : (
-        <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 80px" }}>
+        <div style={{ maxWidth: isDesktop ? 960 : 480, margin: "0 auto", padding: isDesktop ? "20px 32px 80px" : "16px 16px 80px" }}>
 
           {/* ── CALENDAR ── */}
           {activeTab === "calendar" && (
-            <>
+            <div style={{ display: isDesktop ? "flex" : "block", gap: isDesktop ? 24 : 0, alignItems: "flex-start" }}>
+            <div style={{ flex: isDesktop ? "0 0 340px" : undefined }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
                 {DOW.map((d) => <div key={d} style={{ textAlign: "center", fontSize: 9, color: T.textFaint, padding: "3px 0" }}>{d}</div>)}
               </div>
@@ -663,7 +673,9 @@ export default function App() {
                   );
                 })}
               </div>
+            </div>{/* end calendar grid col */}
 
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <div>
@@ -855,7 +867,7 @@ export default function App() {
 
           {/* ── CATEGORIES ── */}
           {activeTab === "categories" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: isDesktop ? "grid" : "flex", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, flexDirection: isDesktop ? undefined : "column", gap: 12, alignItems: "start" }}>
               {totalTargeted > 0 && (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ fontSize: 11, color: T.textMuted }}>TARGETS ALLOCATED</div>
@@ -1012,6 +1024,7 @@ export default function App() {
                 );
               })()}
 
+              <div style={{ display: isDesktop ? "grid" : "contents", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, gap: 12, alignItems: "start" }}>
               {[...funds].sort((a, b) => { const spentA = fundTransactions.filter((t) => t.fund_id === a.id).reduce((s, t) => s + parseFloat(t.amount), 0); const spentB = fundTransactions.filter((t) => t.fund_id === b.id).reduce((s, t) => s + parseFloat(t.amount), 0); return spentB - spentA; }).map((fund) => {
                 const txs = fundTransactions.filter((t) => t.fund_id === fund.id).sort((a, b) => new Date(b.date) - new Date(a.date));
                 const spent = txs.reduce((s, t) => s + parseFloat(t.amount), 0);
@@ -1207,6 +1220,7 @@ export default function App() {
                 );
               })}
 
+              </div>{/* end funds grid */}
               {showNewFund ? (
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16 }}>
                   <div style={{ fontSize: 10, letterSpacing: "0.1em", color: T.textDim, marginBottom: 12 }}>NEW FUND</div>
@@ -1242,7 +1256,7 @@ export default function App() {
           {/* ── SUMMARY ── */}
           {activeTab === "summary" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr 1fr 1fr" : "1fr 1fr", gap: 10 }}>
                 {[
                   { label: "DISCRETIONARY", value: fmt(total), color: statusColor },
                   { label: "REMAINING", value: fmt(remaining), color: remaining >= 0 ? "#6AE89B" : "#E86A6A" },
@@ -1339,7 +1353,215 @@ export default function App() {
           {/* ── IMPORT ── */}
           {activeTab === "import" && (() => {
             // ── CSV parsing logic ──────────────────────────────────────────
+            // ── Citi website copy-paste parser ───────────────────────────────
+            const parseCitiWeb = (text) => {
+              const isDateLine = (s) =>
+                /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4}$/.test(s);
+
+              const parseCitiDate = (s) => new Date(s);
+
+              const parseCitiAmount = (s) => {
+                const isNeg = s.startsWith("-") || s.startsWith("−");
+                const num = parseFloat(s.replace(/[^0-9.]/g, ""));
+                return isNaN(num) ? null : (isNeg ? -num : num);
+              };
+
+              const isAmountLine = (s) => /^[$−-]?\$?[\d,]+\.\d{2}/.test(s) || /^\$[\d,]+/.test(s);
+              const isSkipLine = (s) => /Eligible for Citi|Citi.*Flex Pay|Digital Account Number/i.test(s);
+
+              const shouldSkip = (desc) => {
+                const d = desc.toUpperCase();
+                return /PAYMENT.THANK.YOU|ONLINE.PAYMENT|AUTOPAY|BILL.PAY|MOBILE.PAY|CREDIT.POSTED/.test(d);
+              };
+
+              const categorize = (desc) => {
+                const d = desc.toUpperCase();
+                if (/COSTCO|WM\s?SUPERCENTER|WALMART|STOKES|SMITH.S|KROGER|TRADER JOE|WHOLE FOOD|WINCO|HARMON|MACEYS|SPROUTS|ALDI|SAFEWAY|FRESH FOOD|FROSTOP/.test(d)) return "groceries";
+                if (/MCDONALD|CHICK.FIL|SUBWAY|WENDY|BURGER|TACO|PIZZA|CAFE|PANERA|STARBUCKS|DUTCH.BROS|SONIC|OLIVE.GARDEN|TEXAS.ROAD|RED.ROBIN|APPLEBEE|IHOP|DENNY|WAFFLE|SWIG|KNEADERS|CAFE.RIO|ZUPAS|CHIPOTLE|DOMINO|RAISING|IN-N-OUT|CULVER|FIVE.GUYS|CRUMBL|TAILWIND|FIIZ|JIMMY.JOHN|HIVE/.test(d)) return "dining";
+                if (/CHEVRON|SHELL|MAVERIK|MAVERICK|EXXON|MOBIL|SINCLAIR|PHILLIPS|PILOT|LOVE.S|AUTOZONE|JIFFY.LUBE|FIRESTONE|VALVOLINE|NAPA.AUTO|UBER|LYFT|DISCOUNT.TIRE/.test(d)) return "transport";
+                if (/NETFLIX|HULU|DISNEY|SPOTIFY|APPLE.COM|GOOGLE|AUDIBLE|YOUTUBE|SLING|VIVINT|ADT|FITNESS|GYM|INSURANCE|AT&T|VERIZON|T-MOBILE|COMCAST|XFINITY|NINTENDO|VIDANGEL/.test(d)) return "recurring";
+                if (/AMAZON|NIKE|TARGET|NORDSTROM|MACY|KOHL|OLD.NAVY|GAP|DICK.S|SCHEELS|HOMEGOODS|TJ.MAXX|MARSHALLS|ROSS|EBAY|ETSY|CVS|WALGREEN|WALMART.COM/.test(d)) return "shopping";
+                if (/BYU|TICKET/.test(d)) return "other";
+                return "other";
+              };
+
+              // Clean lines
+              const rawLines = text.split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l);
+
+              // Group into blocks by date lines
+              const blocks = [];
+              let cur = [];
+              for (const line of rawLines) {
+                if (isDateLine(line) && cur.length > 0) {
+                  blocks.push(cur);
+                  cur = [line];
+                } else {
+                  cur.push(line);
+                }
+              }
+              if (cur.length > 0) blocks.push(cur);
+
+              const rows = [];
+              for (const block of blocks) {
+                if (block.length < 2) continue;
+                try {
+                  const date = parseCitiDate(block[0]);
+                  // Amount is the last line (starts with $)
+                  const amountStr = block[block.length - 1];
+                  if (!isAmountLine(amountStr)) continue;
+                  const amount = parseCitiAmount(amountStr);
+                  if (amount === null || amount < 0) continue; // skip negatives (credits/payments)
+
+                  // Description: first non-date, non-skip, non-amount line
+                  let desc = "";
+                  for (let i = 1; i < block.length - 1; i++) {
+                    if (!isSkipLine(block[i]) && !isAmountLine(block[i])) {
+                      desc = block[i]; break;
+                    }
+                  }
+                  if (!desc) desc = block[1];
+                  // Clean up "Digital Account Number" from description if at end
+                  desc = desc.replace(/\s*Digital Account Number\s*X+\d+/i, "").trim();
+
+                  if (shouldSkip(desc)) continue;
+
+                  rows.push({
+                    id: String(Date.now() + Math.random()),
+                    date: date.toDateString(),
+                    dateObj: date,
+                    desc: desc.trim(),
+                    amount,
+                    category: categorize(desc),
+                    include: true,
+                    period: periodKey(date, viewMode),
+                  });
+                } catch (e) { continue; }
+              }
+
+              rows.sort((a, b) => b.dateObj - a.dateObj);
+              return { format: "citi_web", rows, error: rows.length === 0 ? "No transactions found" : null };
+            };
+
+            // ── Chase website copy-paste parser ──────────────────────────────
+            const parseChaseWeb = (text) => {
+              const isDateLine = (s) =>
+                /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4}$/.test(s) ||
+                /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+
+              const parseWebDate = (s) => {
+                if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+                  const [m, d, y] = s.split("/");
+                  return new Date(parseInt(y), parseInt(m)-1, parseInt(d));
+                }
+                return new Date(s); // "Jun 13, 2026"
+              };
+
+              const parseWebAmount = (s) => {
+                const isNeg = s.includes("negative") || s.startsWith("−") || s.startsWith("-");
+                const num = parseFloat(s.replace(/[^0-9.]/g, ""));
+                return isNaN(num) ? null : (isNeg ? -num : num);
+              };
+
+              const categorize = (desc, chaseCat = "") => {
+                const d = desc.toUpperCase(); const c = chaseCat.toLowerCase();
+                if (/COSTCO|WM\s?SUPERCENTER|WALMART|STOKES|SMITH.S|KROGER|TRADER JOE|WHOLE FOOD|WINCO|HARMON|MACEYS|SPROUTS|ALDI|SAFEWAY|FRESH FOOD|FROSTOP/.test(d)) return "groceries";
+                if (/MCDONALD|CHICK.FIL|SUBWAY|WENDY|BURGER|TACO|PIZZA|CAFE|PANERA|STARBUCKS|DUTCH.BROS|SONIC|OLIVE.GARDEN|TEXAS.ROAD|RED.ROBIN|APPLEBEE|IHOP|DENNY|WAFFLE|SWIG|KNEADERS|CAFE.RIO|ZUPAS|CHIPOTLE|DOMINO|RAISING|IN-N-OUT|CULVER|FIVE.GUYS|CRUMBL|TAILWIND/.test(d) || c.includes("food & drink")) return "dining";
+                if (/CHEVRON|SHELL|MAVERIK|MAVERICK|EXXON|MOBIL|SINCLAIR|PHILLIPS|PILOT|LOVE.S|FUEL|AUTOZONE|JIFFY.LUBE|FIRESTONE|VALVOLINE|NAPA.AUTO|UBER|LYFT|DISCOUNT.TIRE/.test(d) || c.includes("gas")) return "transport";
+                if (/NETFLIX|HULU|DISNEY|SPOTIFY|APPLE.COM\/BILL|GOOGLE|AUDIBLE|YOUTUBE|SLING|VIVINT|ADT|FITNESS|GYM|INSURANCE|AT&T|VERIZON|T-MOBILE|COMCAST|XFINITY|NINTENDO/.test(d) || c.includes("entertain")) return "recurring";
+                if (c.includes("travel") || /AIRPORT|PARKING|HOTEL|AIRBNB|NATIONAL CAR|HERTZ|AVIS|SOUTHWEST|DELTA|UNITED|AMERICAN AIR/.test(d)) return "other";
+                if (/AMAZON|NIKE|TARGET|NORDSTROM|MACY|KOHL|OLD.NAVY|GAP|DICK.S|AL.S.SPORT|HOMEGOODS|TJ.MAXX|MARSHALLS|ROSS|EBAY|ETSY|CVS|WALGREEN|SOCCERCOM|REDWOOD/.test(d) || c.includes("shop") || c.includes("health")) return "shopping";
+                return "other";
+              };
+
+              const shouldSkip = (desc) => {
+                const d = desc.toUpperCase();
+                return /PAYMENT.THANK.YOU|ONLINE.PAYMENT|AUTOPAY|BILL.PAY|ONLINE.TRANSFER|MOBILE.PAY/.test(d);
+              };
+
+              // Clean lines: remove header junk and empty lines
+              const rawLines = text.split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l &&
+                  !l.includes("not sorted") &&
+                  l !== "Action" &&
+                  l !== "Category" &&
+                  l !== "Description" &&
+                  l !== "Date" &&
+                  l !== "Amount"
+                );
+
+              // Group lines into transaction blocks by date lines
+              const blocks = [];
+              let cur = [];
+              for (const line of rawLines) {
+                if (isDateLine(line) && cur.length > 0) {
+                  blocks.push(cur);
+                  cur = [line];
+                } else {
+                  cur.push(line);
+                }
+              }
+              if (cur.length > 0) blocks.push(cur);
+
+              const rows = [];
+              for (const block of blocks) {
+                if (block.length < 3) continue;
+                try {
+                  const date = parseWebDate(block[0]);
+                  const desc = block[1]; // first description line
+                  const amountStr = block[block.length - 1];
+                  const amount = parseWebAmount(amountStr);
+                  if (amount === null || isNaN(amount)) continue;
+                  if (shouldSkip(desc)) continue;
+                  // Skip payments (negative = payment on credit card)
+                  if (amount < 0) continue;
+
+                  // Try to get Chase's category from the block (doubled category line)
+                  let chaseCat = "";
+                  for (let i = 2; i < block.length - 1; i++) {
+                    const l = block[i];
+                    if (!l.includes("Pay Over Time") && !isDateLine(l)) {
+                      // Doubled category like "GroceriesGroceries" — take first half
+                      const half = l.slice(0, Math.floor(l.length / 2));
+                      if (l.toLowerCase().startsWith(half.toLowerCase())) {
+                        chaseCat = half;
+                      } else {
+                        chaseCat = l;
+                      }
+                    }
+                  }
+
+                  rows.push({
+                    id: String(Date.now() + Math.random()),
+                    date: date.toDateString(),
+                    dateObj: date,
+                    desc: desc.trim(),
+                    amount,
+                    category: categorize(desc, chaseCat),
+                    include: true,
+                    period: periodKey(date, viewMode),
+                  });
+                } catch (e) { continue; }
+              }
+
+              rows.sort((a, b) => b.dateObj - a.dateObj);
+              return { format: "chase_web", rows, error: rows.length === 0 ? "No transactions found" : null };
+            };
+
             const parseCSV = (text) => {
+              // ── Chase website copy-paste format ──────────────────────────
+              // Detect by presence of "not sorted" in header or doubled descriptions
+              if (text.includes("not sorted") || text.includes("not sortedDate") || text.includes("not sortedAmount")) {
+                return parseChaseWeb(text);
+              }
+
+              // ── Citi website copy-paste format ──────────────────────────
+              if (text.includes("Eligible for Citi") || text.includes("Citi® Flex Pay") || text.includes("Citi Flex Pay")) {
+                return parseCitiWeb(text);
+              }
+
               const lines = text.trim().split(/\r?\n/);
               if (lines.length < 2) return { error: "No data found" };
 
@@ -1510,7 +1732,7 @@ export default function App() {
             const avgTotal = withData.length > 0 ? withData.reduce((s, m) => s + m.total, 0) / withData.length : 0;
 
             // Chart dimensions
-            const chartW = 440; const chartH = 140; const padL = 48; const padR = 12; const padT = 12; const padB = 28;
+            const chartW = isDesktop ? 860 : 440; const chartH = isDesktop ? 180 : 140; const padL = 48; const padR = 12; const padT = 12; const padB = 28;
             const innerW = chartW - padL - padR;
             const innerH = chartH - padT - padB;
             const allTotals = monthData.map((m) => m.total).filter((v) => v > 0);
@@ -1614,7 +1836,7 @@ export default function App() {
 
                 {/* Month rows */}
                 <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "2fr 1fr 1fr 1fr" : "1fr 1fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
                     {["MONTH", "BUDGET", "FUNDS", "TOTAL"].map((h) => (
                       <div key={h} style={{ fontSize: 8, letterSpacing: "0.1em", color: T.textFaint }}>{h}</div>
                     ))}
