@@ -1460,10 +1460,10 @@ export default function App() {
                 return "other";
               };
 
-              // Clean lines
+              // Clean lines — remove empty lines and separator lines (---, ===, etc.)
               const rawLines = text.split(/\r?\n/)
                 .map(l => l.trim())
-                .filter(l => l);
+                .filter(l => l && !/^[-=*_]{2,}$/.test(l));
 
               // Group into blocks by date lines
               const blocks = [];
