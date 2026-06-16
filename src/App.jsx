@@ -795,7 +795,8 @@ export default function App() {
                   </button>
                 )}
               </div>
-            </>
+            </div>{/* end day panel col */}
+            </div>{/* end calendar desktop row */}
           )}
 
           {/* ── QUICK ADD ── */}
