@@ -1376,9 +1376,13 @@ export default function App() {
               };
 
               const parseDate = (str) => {
-                // M/D/YYYY or MM/DD/YYYY
+                // M/D/YYYY, MM/DD/YYYY, M/D/YY, or MM/DD/YY
                 const parts = str.split("/");
-                if (parts.length === 3) return new Date(parts[2], parts[0]-1, parts[1]);
+                if (parts.length === 3) {
+                  let year = parseInt(parts[2]);
+                  if (year < 100) year += 2000; // handle 2-digit years
+                  return new Date(year, parseInt(parts[0])-1, parseInt(parts[1]));
+                }
                 return new Date(str);
               };
 
