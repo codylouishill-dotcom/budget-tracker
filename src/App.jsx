@@ -185,6 +185,7 @@ function ImportTab({ parseCSV, expenses, historyExpenses, setAllExpenses, upsert
     chase_card: "Chase Credit Card (CSV)",
     chase_web: "Chase Website (copy-paste)",
     citi_web: "Citi Website (copy-paste)",
+    venmo: "Venmo CSV",
     chase_checking: "Chase Checking",
     cu: "Credit Union",
   };
@@ -1595,6 +1596,110 @@ export default function App() {
           {/* ── IMPORT ── */}
           {activeTab === "import" && (() => {
             // ── CSV parsing logic ──────────────────────────────────────────
+            // ── Venmo CSV parser ──────────────────────────────────────────────
+            const parseVenmo = (text) => {
+              const splitCSV = (line) => {
+                const row = []; let cur = ""; let inQ = false;
+                for (const ch of line + ",") {
+                  if (ch === '"') { inQ = !inQ; }
+                  else if (ch === "," && !inQ) { row.push(cur.trim().replace(/^"|"$/g, "")); cur = ""; }
+                  else { cur += ch; }
+                }
+                return row;
+              };
+
+              const lines = text.split(/\r?\n/);
+
+              // Find header row — the one with "Datetime" and "Amount"
+              let headerIdx = -1; let headers = [];
+              for (let i = 0; i < lines.length; i++) {
+                const cols = splitCSV(lines[i]).map(c => c.toLowerCase());
+                if (cols.some(c => c.includes("datetime")) && cols.some(c => c.includes("amount"))) {
+                  headerIdx = i; headers = cols; break;
+                }
+              }
+              if (headerIdx === -1) return { error: "Could not find Venmo header row (expected Datetime + Amount columns)" };
+
+              const getCol = (row, name) => {
+                const idx = headers.findIndex(h => h.includes(name));
+                return idx >= 0 ? (row[idx] || "").trim().replace(/^"|"$/g, "") : "";
+              };
+
+              const parseVenmoAmt = (s) => {
+                const str = s.trim();
+                const isNeg = str.includes("(") || str.startsWith("-");
+                const num = parseFloat(str.replace(/[$(),\s]/g, ""));
+                return isNaN(num) ? null : (isNeg ? -num : num);
+              };
+
+              const parseVenmoDate = (s) => {
+                // ISO format: "2026-01-04T07:00:00" or "2026-01-04"
+                const d = new Date(s.split("T")[0]);
+                return isNaN(d.getTime()) ? null : d;
+              };
+
+              const categorize = (note) => {
+                const d = note.toUpperCase();
+                if (/COSTCO|WALMART|STOKES|SMITH|KROGER|TRADER JOE|WHOLE FOOD|WINCO|HARMON|SAFEWAY|FRESH FOOD/.test(d)) return "groceries";
+                if (/MCDONALD|CHICK.FIL|SUBWAY|WENDY|BURGER|TACO|PIZZA|CAFE|PANERA|STARBUCKS|DUTCH.BROS|SONIC|CHIPOTLE|DOMINO|RAISING|CULVER|FIVE.GUYS|CRUMBL|JAMBA|CAFE.RIO|HUNGRY|DRINKS|LUNCH|DINNER|FOOD|RESTAURANT/.test(d)) return "dining";
+                if (/CHEVRON|SHELL|MAVERIK|MAVERICK|EXXON|MOBIL|SINCLAIR|PHILLIPS|PILOT|GAS|FUEL|UBER|LYFT/.test(d)) return "transport";
+                if (/NETFLIX|HULU|DISNEY|SPOTIFY|AUDIBLE|YOUTUBE|SLING|PEACOCK|NINTENDO|VIDANGEL|T-MOBILE|AT&T|VERIZON|INSURANCE/.test(d)) return "recurring";
+                if (/AMAZON|NIKE|TARGET|NORDSTROM|MACY|KOHL|LIDS|KINDLE|SHIRT|SHOE|CLOTHES|BALLOON|SHIN.GUARD|TICKET|BYU|POOL/.test(d)) return "shopping";
+                return "other";
+              };
+
+              const shouldSkip = (type, note) => {
+                const t = (type || "").toLowerCase();
+                const n = (note || "").toLowerCase();
+                return t.includes("transfer") || n.includes("transfer") || n.includes("bank");
+              };
+
+              const rows = [];
+              for (let i = headerIdx + 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                const row = splitCSV(line);
+                if (row.length < 3) continue;
+                try {
+                  const dateStr = getCol(row, "datetime");
+                  const type = getCol(row, "type");
+                  const status = getCol(row, "status");
+                  const note = getCol(row, "note");
+                  const from = getCol(row, "from");
+                  const to = getCol(row, "to");
+                  const amtStr = getCol(row, "amount");
+
+                  if (status && status.toLowerCase() !== "complete") continue;
+                  if (shouldSkip(type, note)) continue;
+
+                  const date = parseVenmoDate(dateStr);
+                  if (!date) continue;
+                  const amount = parseVenmoAmt(amtStr);
+                  if (amount === null) continue;
+
+                  // Build description: note + who it's with
+                  const other = amount < 0 ? to : from;
+                  const desc = [note, other].filter(Boolean).join(" — ").trim() || type;
+
+                  rows.push({
+                    id: String(Date.now() + Math.random()),
+                    date: date.toDateString(),
+                    dateObj: date,
+                    desc,
+                    // Flip Venmo sign: their negative (parentheses) = money sent = our positive expense
+                    // Their positive = money received = our negative (credit)
+                    amount: -amount,
+                    category: categorize(note),
+                    include: amount < 0, // default include only payments (money sent out)
+                    period: periodKey(date, viewMode),
+                  });
+                } catch (e) { continue; }
+              }
+
+              rows.sort((a, b) => b.dateObj - a.dateObj);
+              return { format: "venmo", rows, error: rows.length === 0 ? "No transactions found" : null };
+            };
+
             // ── Citi website copy-paste parser ───────────────────────────────
             const parseCitiWeb = (text) => {
               const isDateLine = (s) =>
@@ -1797,6 +1902,11 @@ export default function App() {
               // Detect by presence of "not sorted" in header or doubled descriptions
               if (text.includes("not sorted") || text.includes("not sortedDate") || text.includes("not sortedAmount")) {
                 return parseChaseWeb(text);
+              }
+
+              // ── Venmo CSV format ─────────────────────────────────────────
+              if (text.includes("Amount (total)") || (text.toLowerCase().includes("venmo") && text.includes("Datetime"))) {
+                return parseVenmo(text);
               }
 
               // ── Citi website copy-paste format ──────────────────────────
