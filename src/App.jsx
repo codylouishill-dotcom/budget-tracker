@@ -100,7 +100,7 @@ const periodKey = (start, mode) => mode === "monthly"
   : start.toISOString().slice(0,10);
 
 // ── ImportTab Component ──────────────────────────────────────────────────────
-function ImportTab({ parseCSV, expenses, historyExpenses, setAllExpenses, upsertExpense, curPeriodKey, funds, periodStart, periodEnd, T, iStyle, fmt, CATEGORIES, setSyncStatus, setSyncError }) {
+function ImportTab({ parseCSV, expenses, historyExpenses, setAllExpenses, upsertExpense, upsertFundTransaction, setFundTransactions, curPeriodKey, funds, periodStart, periodEnd, T, iStyle, fmt, CATEGORIES, setSyncStatus, setSyncError }) {
   const [csvText, setCsvText] = useState("");
   const [parsed, setParsed] = useState(null); // { format, rows, error }
   const [importing, setImporting] = useState(false);
@@ -139,21 +139,36 @@ function ImportTab({ parseCSV, expenses, historyExpenses, setAllExpenses, upsert
     setImporting(true);
     setSyncStatus("saving");
     try {
-      const exps = toImport.map((r) => ({
+      // Split into budget expenses and fund-move transactions
+      const budgetRows = toImport.filter((r) => r.fundMode !== "move");
+      const fundMoveRows = toImport.filter((r) => r.fundMode === "move" && r.fund_id);
+
+      const exps = budgetRows.map((r) => ({
         id: String(Date.now() + Math.random()),
         date: r.date,
         amount: r.amount,
         label: r.desc,
-        fund_id: r.fund_id || null,
         category: r.category,
         period: curPeriodKey,
-        fund_id: null,
+        fund_id: r.fundMode === "tag" ? (r.fund_id || null) : null,
       }));
-      await Promise.all(exps.map(upsertExpense));
+      const fundTxs = fundMoveRows.map((r) => ({
+        id: String(Date.now() + Math.random()),
+        fund_id: r.fund_id,
+        amount: r.amount,
+        label: r.desc,
+        date: r.date.includes(",") ? new Date(r.date).toISOString().slice(0,10) : r.date,
+      }));
+
+      await Promise.all([
+        ...exps.map(upsertExpense),
+        ...fundTxs.map(upsertFundTransaction),
+      ]);
       setAllExpenses((prev) => [...prev, ...exps.filter((e) => {
         const d = new Date(e.date); d.setHours(0,0,0,0);
         return d >= periodStart && d <= periodEnd;
       })]);
+      setFundTransactions((prev) => [...prev, ...fundTxs]);
       setSyncStatus("idle");
       setImported(true);
       setCsvText("");
@@ -288,18 +303,36 @@ function ImportTab({ parseCSV, expenses, historyExpenses, setAllExpenses, upsert
                         ))}
                       </div>
                       {hasFunds && (
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-                          <span style={{ fontSize: 9, color: T.textFaint, letterSpacing: "0.08em" }}>FUND:</span>
-                          <button className="btn" onClick={() => updateRow(row.id, "fund_id", null)}
-                            style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: !row.fund_id ? T.accent+"33" : T.surface2, border: `1px solid ${!row.fund_id ? T.accent : T.border}`, color: !row.fund_id ? T.accent : T.textFaint }}>
-                            None
-                          </button>
-                          {funds.map((f) => (
-                            <button key={f.id} className="btn" onClick={() => updateRow(row.id, "fund_id", row.fund_id === f.id ? null : f.id)}
-                              style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.fund_id === f.id ? T.accent+"33" : T.surface2, border: `1px solid ${row.fund_id === f.id ? T.accent : T.border}`, color: row.fund_id === f.id ? T.accent : T.textFaint }}>
-                              {f.icon} {f.name}
-                            </button>
-                          ))}
+                        <div>
+                          {/* Mode selector */}
+                          <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                            <span style={{ fontSize: 9, color: T.textFaint, letterSpacing: "0.08em", alignSelf: "center" }}>FUND:</span>
+                            {[
+                              { mode: "none", label: "None" },
+                              { mode: "tag", label: "Tag" },
+                              { mode: "move", label: "Move" },
+                            ].map(({ mode, label }) => (
+                              <button key={mode} className="btn" onClick={() => updateRow(row.id, "fundMode", mode)}
+                                style={{ padding: "2px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: (row.fundMode || "none") === mode ? T.accent+"33" : T.surface2, border: `1px solid ${(row.fundMode || "none") === mode ? T.accent : T.border}`, color: (row.fundMode || "none") === mode ? T.accent : T.textFaint }}>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          {/* Fund picker — shown when mode is tag or move */}
+                          {row.fundMode && row.fundMode !== "none" && (
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                              {funds.map((f) => (
+                                <button key={f.id} className="btn" onClick={() => updateRow(row.id, "fund_id", row.fund_id === f.id ? null : f.id)}
+                                  style={{ padding: "2px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: row.fund_id === f.id ? `${T.accent}33` : T.surface2, border: `1px solid ${row.fund_id === f.id ? T.accent : T.border}`, color: row.fund_id === f.id ? T.accent : T.textFaint }}>
+                                  {f.icon} {f.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {/* Move warning */}
+                          {row.fundMode === "move" && (
+                            <div style={{ fontSize: 9, color: "#E8D06A", marginTop: 4 }}>⚠ Will be saved to fund only, not to budget</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -360,6 +393,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("calendar");
   const [catTargets, setCatTargets] = useState({});
   const [excludedCats, setExcludedCats] = useState({});
+  const [fundOffsetEnabled, setFundOffsetEnabled] = useState(false);
   const [editingTarget, setEditingTarget] = useState(null);
   const [targetInput, setTargetInput] = useState("");
   const [expandedCats, setExpandedCats] = useState({});
@@ -385,6 +419,9 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [expandedMonths, setExpandedMonths] = useState({});
   const toggleMonth = (key) => setExpandedMonths((prev) => ({ ...prev, [key]: !prev[key] }));
+  const [expandedHistoryCats, setExpandedHistoryCats] = useState({});
+  const toggleHistoryCat = (key) => setExpandedHistoryCats((prev) => ({ ...prev, [key]: !prev[key] }));
+  const [editingHistoryExpense, setEditingHistoryExpense] = useState(null);
 
   const [syncStatus, setSyncStatus] = useState("loading");
   const [syncError, setSyncError] = useState("");
@@ -418,6 +455,7 @@ export default function App() {
         const excl = {};
         CATEGORIES.forEach((c) => { if (sm[`exclude_${c.id}`] === "true") excl[c.id] = true; });
         setExcludedCats(excl);
+        setFundOffsetEnabled(sm["fund_offset_enabled"] === "true");
         setSyncStatus("idle"); setInitialized(true);
       } catch (e) { setSyncStatus("error"); setSyncError(e.message); setInitialized(true); }
     })();
@@ -447,6 +485,23 @@ export default function App() {
   const statusColor = paceRatio <= 1.0 ? "#6AE89B" : paceRatio <= 1.25 ? "#E8D06A" : "#E86A6A";
   const totalTargeted = Object.values(catTargets).reduce((s, v) => s + (v || 0), 0);
   const hasExcluded = Object.values(excludedCats).some(Boolean);
+
+  // Fund offset: on days over daily average, excess fund-tagged spending is offset from budget total
+  const fundOffset = useMemo(() => {
+    if (!fundOffsetEnabled) return 0;
+    return days.reduce((totalOffset, d, i) => {
+      const dayExps = expensesByDay[i];
+      const dayTotal = dayExps.filter(e => !excludedCats[e.category]).reduce((s, e) => s + parseFloat(e.amount), 0);
+      if (dayTotal <= dailyBudget) return totalOffset;
+      const dayFundTagged = dayExps.filter(e => e.fund_id && !excludedCats[e.category]).reduce((s, e) => s + parseFloat(e.amount), 0);
+      const excess = dayTotal - dailyBudget;
+      return totalOffset + Math.min(excess, dayFundTagged);
+    }, 0);
+  }, [fundOffsetEnabled, expenses, excludedCats, dailyBudget, days]);
+
+  const adjustedTotal = total - fundOffset;
+  const adjustedRemaining = effectiveBudget - adjustedTotal;
+  const adjustedPct = Math.min((adjustedTotal / Math.max(effectiveBudget, 1)) * 100, 100);
 
   const getCatData = (catId) => {
     const catExps = expenses.filter((e) => e.category === catId);
@@ -514,6 +569,69 @@ export default function App() {
     setEditingTarget(null); setTargetInput("");
     setSyncStatus("saving");
     try { await upsertSetting(`target_${viewMode}_${curPeriodKey}_${catId}`, val); setSyncStatus("idle"); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const saveHistoryEdit = async () => {
+    if (!editingHistoryExpense) return;
+    const amt = parseFloat(editingHistoryExpense.amount);
+    if (!amt || !editingHistoryExpense.label.trim()) return;
+    const finalAmt = editingHistoryExpense.isCredit ? -amt : amt;
+    const updated = {
+      ...historyExpenses.find((e) => e.id === editingHistoryExpense.id),
+      amount: finalAmt,
+      label: editingHistoryExpense.label.trim(),
+      category: editingHistoryExpense.category,
+      fund_id: editingHistoryExpense.editFundMode === "none" ? null : (editingHistoryExpense.fund_id || null),
+    };
+    setHistoryExpenses((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+    // Also update allExpenses if in current period
+    setAllExpenses((prev) => prev.map((e) => e.id === updated.id ? updated : e));
+    setEditingHistoryExpense(null);
+    setSyncStatus("saving");
+    try { await upsertExpense(updated); setSyncStatus("idle"); }
+    catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const moveHistoryExpenseToFund = async (expId, fundId) => {
+    const exp = historyExpenses.find((e) => e.id === expId);
+    if (!exp || !fundId) return;
+    setHistoryExpenses((prev) => prev.filter((e) => e.id !== expId));
+    setAllExpenses((prev) => prev.filter((e) => e.id !== expId));
+    const tx = { id: String(Date.now()), fund_id: fundId, amount: Math.abs(parseFloat(exp.amount)), label: exp.label, date: new Date(exp.date).toISOString().slice(0,10) };
+    setFundTransactions((prev) => [...prev, tx]);
+    setEditingHistoryExpense(null);
+    setSyncStatus("saving");
+    try { await deleteExpense(expId); await upsertFundTransaction(tx); setSyncStatus("idle"); }
+    catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const moveExpenseToFund = async (expId, fundId) => {
+    const exp = allExpenses.find((e) => e.id === expId);
+    if (!exp || !fundId) return;
+    // Remove from budget expenses
+    setAllExpenses((prev) => prev.filter((e) => e.id !== expId));
+    // Add as fund transaction
+    const tx = {
+      id: String(Date.now()),
+      fund_id: fundId,
+      amount: Math.abs(parseFloat(exp.amount)),
+      label: exp.label,
+      date: new Date(exp.date).toISOString().slice(0,10),
+    };
+    setFundTransactions((prev) => [...prev, tx]);
+    setEditingExpense(null);
+    setSyncStatus("saving");
+    try {
+      await deleteExpense(expId);
+      await upsertFundTransaction(tx);
+      setSyncStatus("idle");
+    } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
+  };
+
+  const toggleFundOffset = async () => {
+    const newVal = !fundOffsetEnabled;
+    setFundOffsetEnabled(newVal);
+    try { await upsertSetting("fund_offset_enabled", newVal); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
   };
 
   const toggleExclude = async (catId) => {
@@ -669,16 +787,20 @@ export default function App() {
 
           {/* Progress */}
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 11 }}>
-            <span style={{ color: T.textMuted }}>SPENT <span style={{ color: statusColor }}>{fmt(total)}</span>{hasExcluded && <span style={{ color: T.textFaint, fontSize: 9 }}> excl.</span>}</span>
-            <span style={{ color: T.textMuted }}>LEFT <span style={{ color: remaining >= 0 ? T.text : "#E86A6A" }}>{fmt(remaining)}</span></span>
+            <span style={{ color: T.textMuted }}>
+              SPENT <span style={{ color: statusColor }}>{fmt(fundOffsetEnabled ? adjustedTotal : total)}</span>
+              {hasExcluded && <span style={{ color: T.textFaint, fontSize: 9 }}> excl.</span>}
+              {fundOffsetEnabled && fundOffset > 0 && <span style={{ color: T.textFaint, fontSize: 9 }}> ({fmt(fundOffset)} offset)</span>}
+            </span>
+            <span style={{ color: T.textMuted }}>LEFT <span style={{ color: (fundOffsetEnabled ? adjustedRemaining : remaining) >= 0 ? T.text : "#E86A6A" }}>{fmt(fundOffsetEnabled ? adjustedRemaining : remaining)}</span></span>
           </div>
           <div style={{ height: 6, background: T.border, borderRadius: 3, overflow: "hidden", position: "relative" }}>
-            <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg, ${statusColor}88, ${statusColor})`, borderRadius: 3, transition: "width 0.4s ease" }} />
+            <div style={{ height: "100%", width: `${fundOffsetEnabled ? adjustedPct : pct}%`, background: `linear-gradient(90deg, ${statusColor}88, ${statusColor})`, borderRadius: 3, transition: "width 0.4s ease" }} />
             <div style={{ position: "absolute", top: 0, left: `${progressFraction * 100}%`, width: 2, height: "100%", background: T.textMuted, transform: "translateX(-1px)" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: T.textFaint, marginTop: 3 }}>
             <span>Day {daysElapsed} of {periodLength} · {fmt(dailyBudget)}/day left</span>
-            <span>{pct.toFixed(1)}%</span>
+            <span>{(fundOffsetEnabled ? adjustedPct : pct).toFixed(1)}%</span>
           </div>
         </div>
 
@@ -792,19 +914,39 @@ export default function App() {
                               </div>
                               {funds.length > 0 && (
                                 <div style={{ marginBottom: 10 }}>
-                                  <div style={{ fontSize: 9, letterSpacing: "0.1em", color: T.textDim, marginBottom: 5 }}>TAG TO FUND</div>
-                                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                                    <button className="btn" onClick={() => setEditingExpense((p) => ({ ...p, fund_id: null }))}
-                                      style={{ padding: "4px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: !editingExpense.fund_id ? T.accent+"33" : T.surface3, border: `1px solid ${!editingExpense.fund_id ? T.accent : T.border}`, color: !editingExpense.fund_id ? T.accent : T.textMuted }}>
-                                      None
-                                    </button>
-                                    {funds.map((f) => (
-                                      <button key={f.id} className="btn" onClick={() => setEditingExpense((p) => ({ ...p, fund_id: p.fund_id === f.id ? null : f.id }))}
-                                        style={{ padding: "4px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: editingExpense.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${editingExpense.fund_id === f.id ? T.accent : T.border}`, color: editingExpense.fund_id === f.id ? T.accent : T.textMuted }}>
-                                        {f.icon} {f.name}
+                                  {/* Mode toggle */}
+                                  <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center" }}>
+                                    <span style={{ fontSize: 9, letterSpacing: "0.1em", color: T.textDim }}>FUND</span>
+                                    {[
+                                      { mode: "none", label: "None" },
+                                      { mode: "tag", label: "Tag" },
+                                      { mode: "move", label: "Move" },
+                                    ].map(({ mode, label }) => (
+                                      <button key={mode} className="btn"
+                                        onClick={() => setEditingExpense((p) => ({ ...p, editFundMode: mode, fund_id: mode === "none" ? null : p.fund_id }))}
+                                        style={{ padding: "4px 10px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: (editingExpense.editFundMode || (editingExpense.fund_id ? "tag" : "none")) === mode ? T.accent+"33" : T.surface3, border: `1px solid ${(editingExpense.editFundMode || (editingExpense.fund_id ? "tag" : "none")) === mode ? T.accent : T.border}`, color: (editingExpense.editFundMode || (editingExpense.fund_id ? "tag" : "none")) === mode ? T.accent : T.textMuted }}>
+                                        {label}
                                       </button>
                                     ))}
                                   </div>
+                                  {/* Fund selector */}
+                                  {(editingExpense.editFundMode || (editingExpense.fund_id ? "tag" : "none")) !== "none" && (
+                                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+                                      {funds.map((f) => (
+                                        <button key={f.id} className="btn" onClick={() => setEditingExpense((p) => ({ ...p, fund_id: p.fund_id === f.id ? null : f.id }))}
+                                          style={{ padding: "4px 9px", borderRadius: 20, fontSize: 11, fontFamily: "inherit", background: editingExpense.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${editingExpense.fund_id === f.id ? T.accent : T.border}`, color: editingExpense.fund_id === f.id ? T.accent : T.textMuted }}>
+                                          {f.icon} {f.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {/* Move action */}
+                                  {(editingExpense.editFundMode === "move") && editingExpense.fund_id && (
+                                    <button className="btn" onClick={() => moveExpenseToFund(editingExpense.id, editingExpense.fund_id)}
+                                      style={{ width: "100%", background: "#E8D06A22", border: "1px solid #E8D06A55", borderRadius: 8, padding: "9px", fontSize: 12, color: "#E8D06A", fontFamily: "inherit", marginBottom: 4 }}>
+                                      Move to {funds.find(f => f.id === editingExpense.fund_id)?.name} (removes from budget)
+                                    </button>
+                                  )}
                                 </div>
                               )}
                               <div style={{ display: "flex", gap: 8 }}>
@@ -1331,10 +1473,28 @@ export default function App() {
           {/* ── SUMMARY ── */}
           {activeTab === "summary" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {/* Fund offset toggle */}
+              {funds.some(f => fundTransactions.filter(t => t.fund_id === f.id).length > 0 || expenses.some(e => e.fund_id)) && (
+                <div style={{ background: T.surface, border: `1px solid ${fundOffsetEnabled ? T.accent+"55" : T.border}`, borderRadius: 12, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>Fund Day Offset</div>
+                    <div style={{ fontSize: 10, color: T.textDim, lineHeight: 1.4 }}>
+                      On days over {fmt(dailyBudget)}/day avg, excess fund-tagged spending is offset from your budget total.
+                      {fundOffsetEnabled && fundOffset > 0 && <span style={{ color: T.accent }}> Saving {fmt(fundOffset)} this period.</span>}
+                    </div>
+                  </div>
+                  <button className="btn" onClick={toggleFundOffset}
+                    style={{ width: 44, height: 24, borderRadius: 12, background: fundOffsetEnabled ? T.accent : T.border, position: "relative", flexShrink: 0 }}>
+                    <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: fundOffsetEnabled ? 23 : 3, transition: "left 0.2s" }} />
+                  </button>
+                </div>
+              )}
+
               <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr 1fr 1fr" : "1fr 1fr", gap: 10 }}>
                 {[
-                  { label: "DISCRETIONARY", value: fmt(total), color: statusColor },
-                  { label: "REMAINING", value: fmt(remaining), color: remaining >= 0 ? "#6AE89B" : "#E86A6A" },
+                  { label: "DISCRETIONARY", value: fmt(fundOffsetEnabled ? adjustedTotal : total), color: statusColor },
+                  { label: "REMAINING", value: fmt(fundOffsetEnabled ? adjustedRemaining : remaining), color: (fundOffsetEnabled ? adjustedRemaining : remaining) >= 0 ? "#6AE89B" : "#E86A6A" },
                   { label: hasExcluded ? "TOTAL (ALL)" : "DAILY AVG", value: hasExcluded ? fmt(totalIncExcluded) : fmt(total / Math.max(daysElapsed, 1)), color: T.text },
                   { label: "TRANSACTIONS", value: String(expenses.length), color: T.text },
                 ].map((s) => (
@@ -1762,7 +1922,7 @@ export default function App() {
               return { format, rows, error: null };
             };
 
-            return <ImportTab parseCSV={parseCSV} expenses={allExpenses} historyExpenses={historyExpenses} setAllExpenses={setAllExpenses} upsertExpense={upsertExpense} curPeriodKey={curPeriodKey} funds={funds} periodStart={periodStart} periodEnd={periodEnd} T={T} iStyle={iStyle} fmt={fmt} CATEGORIES={CATEGORIES} setSyncStatus={setSyncStatus} setSyncError={setSyncError} />;
+            return <ImportTab parseCSV={parseCSV} expenses={allExpenses} historyExpenses={historyExpenses} setAllExpenses={setAllExpenses} upsertExpense={upsertExpense} upsertFundTransaction={upsertFundTransaction} setFundTransactions={setFundTransactions} curPeriodKey={curPeriodKey} funds={funds} periodStart={periodStart} periodEnd={periodEnd} T={T} iStyle={iStyle} fmt={fmt} CATEGORIES={CATEGORIES} setSyncStatus={setSyncStatus} setSyncError={setSyncError} />;
           })()}
 
           {/* ── HISTORY ── */}
@@ -1953,24 +2113,120 @@ export default function App() {
                         </div>
                         {isExpanded && (
                           <div style={{ padding: "0 14px 12px", background: T.surface2 }}>
-                            {/* Category breakdown */}
+                            {/* Category breakdown with expandable transactions */}
                             {catBreakdown.length > 0 && (
                               <div style={{ marginTop: 10 }}>
                                 <div style={{ fontSize: 8, letterSpacing: "0.1em", color: T.textDim, marginBottom: 8 }}>BY CATEGORY</div>
                                 {catBreakdown.map((c) => {
                                   const pct = m.budgetSpent !== 0 ? Math.abs((c.net / m.budgetSpent) * 100) : 0;
+                                  const catExps = m.exps.filter((e) => e.category === c.id).sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount)));
+                                  const catKey = `${m.mk}-${c.id}`;
+                                  const isCatExpanded = expandedHistoryCats[catKey];
                                   return (
-                                    <div key={c.id} style={{ marginBottom: 8 }}>
+                                    <div key={c.id} style={{ marginBottom: 10 }}>
                                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                                        <span style={{ fontSize: 11 }}>{c.icon} {c.label}</span>
+                                        <button className="btn" onClick={() => toggleHistoryCat(catKey)}
+                                          style={{ background: "none", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit", padding: 0 }}>
+                                          <span style={{ fontSize: 11 }}>{c.icon} {c.label}</span>
+                                          <span style={{ fontSize: 9, color: T.textFaint }}>({catExps.length})</span>
+                                          <span style={{ fontSize: 10, color: T.textFaint, transform: isCatExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                                        </button>
                                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                           <span style={{ fontSize: 9, color: T.textFaint }}>{pct.toFixed(0)}%</span>
                                           <span style={{ fontSize: 12, color: c.net < 0 ? "#6AE89B" : c.color }}>{c.net < 0 ? `+${fmt(Math.abs(c.net))}` : fmt(c.net)}</span>
                                         </div>
                                       </div>
-                                      <div style={{ height: 3, background: T.border, borderRadius: 2, overflow: "hidden" }}>
+                                      <div style={{ height: 3, background: T.border, borderRadius: 2, overflow: "hidden", marginBottom: isCatExpanded ? 6 : 0 }}>
                                         <div style={{ height: "100%", width: `${Math.min(pct, 100)}%`, background: c.color, borderRadius: 2 }} />
                                       </div>
+                                      {/* Transaction list */}
+                                      {isCatExpanded && (
+                                        <div style={{ background: T.surface, borderRadius: 8, overflow: "hidden", marginTop: 4 }}>
+                                          {catExps.map((e) => {
+                                            const isCredit = parseFloat(e.amount) < 0;
+                                            const isEditingThis = editingHistoryExpense?.id === e.id;
+                                            const fund = funds.find((f) => f.id === e.fund_id);
+                                            return (
+                                              <div key={e.id} style={{ borderBottom: `1px solid ${T.surface3}` }}>
+                                                {/* Transaction row */}
+                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+                                                  <div style={{ minWidth: 0 }}>
+                                                    <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
+                                                    <div style={{ fontSize: 9, color: T.textDim, marginTop: 1 }}>
+                                                      {new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                                      {fund && <span style={{ marginLeft: 6, color: T.accent }}>· {fund.icon} {fund.name}</span>}
+                                                      {isCredit && <span style={{ marginLeft: 6, color: "#6AE89B" }}>· credit</span>}
+                                                    </div>
+                                                  </div>
+                                                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                                    <div style={{ fontSize: 13, fontWeight: 500, color: isCredit ? "#6AE89B" : c.color }}>{isCredit ? `+${fmt(Math.abs(parseFloat(e.amount)))}` : fmt(parseFloat(e.amount))}</div>
+                                                    <button className="btn"
+                                                      onClick={() => isEditingThis ? setEditingHistoryExpense(null) : setEditingHistoryExpense({ id: e.id, amount: String(Math.abs(parseFloat(e.amount))), label: e.label, category: e.category, isCredit, fund_id: e.fund_id || null, editFundMode: e.fund_id ? "tag" : "none" })}
+                                                      style={{ background: isEditingThis ? T.surface2 : "none", border: isEditingThis ? `1px solid ${T.border}` : "none", borderRadius: 6, color: isEditingThis ? T.accent : T.textDim, fontSize: 11, padding: "2px 7px", fontFamily: "inherit" }}>
+                                                      {isEditingThis ? "cancel" : "edit"}
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                                {/* Inline edit form */}
+                                                {isEditingThis && (
+                                                  <div style={{ background: T.surface2, padding: "10px 10px 12px" }}>
+                                                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                                                      <input type="number" inputMode="decimal" value={editingHistoryExpense.amount}
+                                                        onChange={(e) => setEditingHistoryExpense((p) => ({ ...p, amount: e.target.value }))}
+                                                        style={{ flex: "0 0 90px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 15, padding: "7px 9px", fontFamily: "inherit", outline: "none" }} />
+                                                      <input type="text" value={editingHistoryExpense.label}
+                                                        onChange={(e) => setEditingHistoryExpense((p) => ({ ...p, label: e.target.value }))}
+                                                        onKeyDown={(e) => e.key === "Enter" && saveHistoryEdit()}
+                                                        style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 9px", fontFamily: "inherit", outline: "none" }} />
+                                                    </div>
+                                                    {/* Category */}
+                                                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+                                                      {CATEGORIES.map((cat) => (
+                                                        <button key={cat.id} className="btn" onClick={() => setEditingHistoryExpense((p) => ({ ...p, category: cat.id }))}
+                                                          style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: editingHistoryExpense.category === cat.id ? `${cat.color}33` : T.surface3, border: `1px solid ${editingHistoryExpense.category === cat.id ? cat.color : T.border}`, color: editingHistoryExpense.category === cat.id ? cat.color : T.textMuted }}>
+                                                          {cat.icon} {cat.label}
+                                                        </button>
+                                                      ))}
+                                                    </div>
+                                                    {/* Fund */}
+                                                    {funds.length > 0 && (
+                                                      <div style={{ marginBottom: 8 }}>
+                                                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                                                          <span style={{ fontSize: 9, color: T.textDim, letterSpacing: "0.08em" }}>FUND:</span>
+                                                          {[{ mode: "none", label: "None" }, { mode: "tag", label: "Tag" }, { mode: "move", label: "Move" }].map(({ mode, label }) => (
+                                                            <button key={mode} className="btn" onClick={() => setEditingHistoryExpense((p) => ({ ...p, editFundMode: mode, fund_id: mode === "none" ? null : p.fund_id }))}
+                                                              style={{ padding: "3px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: (editingHistoryExpense.editFundMode || "none") === mode ? T.accent+"33" : T.surface3, border: `1px solid ${(editingHistoryExpense.editFundMode || "none") === mode ? T.accent : T.border}`, color: (editingHistoryExpense.editFundMode || "none") === mode ? T.accent : T.textMuted }}>
+                                                              {label}
+                                                            </button>
+                                                          ))}
+                                                          {editingHistoryExpense.editFundMode && editingHistoryExpense.editFundMode !== "none" && funds.map((f) => (
+                                                            <button key={f.id} className="btn" onClick={() => setEditingHistoryExpense((p) => ({ ...p, fund_id: p.fund_id === f.id ? null : f.id }))}
+                                                              style={{ padding: "3px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: editingHistoryExpense.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${editingHistoryExpense.fund_id === f.id ? T.accent : T.border}`, color: editingHistoryExpense.fund_id === f.id ? T.accent : T.textMuted }}>
+                                                              {f.icon} {f.name}
+                                                            </button>
+                                                          ))}
+                                                        </div>
+                                                        {editingHistoryExpense.editFundMode === "move" && editingHistoryExpense.fund_id && (
+                                                          <button className="btn" onClick={() => moveHistoryExpenseToFund(editingHistoryExpense.id, editingHistoryExpense.fund_id)}
+                                                            style={{ width: "100%", background: "#E8D06A22", border: "1px solid #E8D06A44", borderRadius: 6, padding: "7px", fontSize: 11, color: "#E8D06A", fontFamily: "inherit", marginTop: 6 }}>
+                                                            Move to {funds.find(f => f.id === editingHistoryExpense.fund_id)?.name} (removes from budget)
+                                                          </button>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                    <div style={{ display: "flex", gap: 6 }}>
+                                                      <button className="btn" onClick={saveHistoryEdit}
+                                                        style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 7, padding: "9px", fontSize: 12, fontWeight: 500, fontFamily: "inherit" }}>SAVE</button>
+                                                      <button className="btn" onClick={() => { setHistoryExpenses((prev) => prev.filter((ex) => ex.id !== e.id)); setAllExpenses((prev) => prev.filter((ex) => ex.id !== e.id)); setEditingHistoryExpense(null); setSyncStatus("saving"); deleteExpense(e.id).then(() => setSyncStatus("idle")).catch(() => setSyncStatus("error")); }}
+                                                        style={{ padding: "9px 12px", background: "#E86A6A22", border: "1px solid #E86A6A44", color: "#E86A6A", borderRadius: 7, fontSize: 12, fontFamily: "inherit" }}>Delete</button>
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })}
