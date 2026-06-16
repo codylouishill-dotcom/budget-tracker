@@ -100,7 +100,7 @@ const periodKey = (start, mode) => mode === "monthly"
   : start.toISOString().slice(0,10);
 
 // ── ImportTab Component ──────────────────────────────────────────────────────
-function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPeriodKey, funds, periodStart, periodEnd, T, iStyle, fmt, CATEGORIES, setSyncStatus, setSyncError }) {
+function ImportTab({ parseCSV, expenses, historyExpenses, setAllExpenses, upsertExpense, curPeriodKey, funds, periodStart, periodEnd, T, iStyle, fmt, CATEGORIES, setSyncStatus, setSyncError }) {
   const [csvText, setCsvText] = useState("");
   const [parsed, setParsed] = useState(null); // { format, rows, error }
   const [importing, setImporting] = useState(false);
@@ -111,7 +111,22 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
     if (!csvText.trim()) return;
     const result = parseCSV(csvText);
     setParsed(result);
-    if (!result.error) setRows(result.rows.map((r) => ({ ...r })));
+    if (!result.error) {
+      // Combine all known expenses for duplicate detection
+      const knownExps = [...(expenses || []), ...(historyExpenses || [])];
+      const rowsWithDupes = result.rows.map((r) => {
+        const rowDate = new Date(r.date).getTime();
+        const rowAmt = Math.abs(r.amount);
+        const match = knownExps.find((e) => {
+          const eDate = new Date(e.date).getTime();
+          const eAmt = Math.abs(parseFloat(e.amount));
+          const daysDiff = Math.abs((rowDate - eDate) / 86400000);
+          return Math.abs(eAmt - rowAmt) < 0.01 && daysDiff <= 2;
+        });
+        return { ...r, duplicate: match ? { date: match.date, label: match.label } : null };
+      });
+      setRows(rowsWithDupes);
+    }
     setImported(false);
   };
 
@@ -205,10 +220,14 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
       {parsed && !parsed.error && rows.length > 0 && (
         <>
           {/* Format + stats bar */}
+          {(() => {
+            const dupeCount = rows.filter((r) => r.include && r.duplicate).length;
+            return (
           <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontSize: 10, color: T.textDim, marginBottom: 2 }}>DETECTED: <span style={{ color: T.accent }}>{FORMAT_LABELS[parsed.format]}</span></div>
               <div style={{ fontSize: 12 }}>{includedCount} of {rows.length} transactions · {fmt(includedTotal)}</div>
+              {dupeCount > 0 && <div style={{ fontSize: 10, color: "#E8D06A", marginTop: 2 }}>⚠ {dupeCount} possible duplicate{dupeCount > 1 ? "s" : ""}</div>}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn" onClick={() => setRows((p) => p.map((r) => ({ ...r, include: true })))}
@@ -219,6 +238,8 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
                 style={{ fontSize: 11, color: T.textDim, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 9px", fontFamily: "inherit" }}>← Back</button>
             </div>
           </div>
+            );
+          })()}
 
           {/* Transaction rows */}
           <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
@@ -226,8 +247,9 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
               const cat = CATEGORIES.find((c) => c.id === row.category);
               const dateStr = new Date(row.date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
               const isCredit = row.amount < 0;
+              const isDupe = !!row.duplicate;
               return (
-                <div key={row.id} style={{ borderBottom: `1px solid ${T.border}`, padding: "10px 14px", opacity: row.include ? 1 : 0.4 }}>
+                <div key={row.id} style={{ borderBottom: `1px solid ${T.border}`, padding: "10px 14px", opacity: row.include ? 1 : 0.4, background: isDupe && row.include ? "#E8D06A08" : "transparent" }}>
                   {/* Main row */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button className="btn" onClick={() => updateRow(row.id, "include", !row.include)}
@@ -238,6 +260,22 @@ function ImportTab({ parseCSV, expenses, setAllExpenses, upsertExpense, curPerio
                     <div style={{ flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text }}>{row.desc}</div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: isCredit ? "#6AE89B" : T.text, flexShrink: 0 }}>{isCredit ? `+${fmt(Math.abs(row.amount))}` : fmt(row.amount)}</div>
                   </div>
+                  {/* Duplicate warning */}
+                  {isDupe && row.include && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, paddingLeft: 28, paddingBottom: 4 }}>
+                      <div style={{ background: "#E8D06A22", border: "1px solid #E8D06A55", borderRadius: 6, padding: "3px 8px", fontSize: 10, color: "#E8D06A", display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                        <span>⚠ Possible duplicate:</span>
+                        <span style={{ color: "#E8D06A99" }}>
+                          {new Date(row.duplicate.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {row.duplicate.label}
+                        </span>
+                      </div>
+                      <button className="btn" onClick={() => updateRow(row.id, "include", false)}
+                        style={{ fontSize: 10, color: "#E8D06A", background: "#E8D06A22", border: "1px solid #E8D06A44", borderRadius: 6, padding: "3px 8px", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                        Skip
+                      </button>
+                    </div>
+                  )}
+
                   {/* Category pills + fund tag */}
                   {row.include && (
                     <div style={{ paddingLeft: 28, marginTop: 8 }}>
@@ -1414,9 +1452,9 @@ export default function App() {
               const categorize = (desc) => {
                 const d = desc.toUpperCase();
                 if (/COSTCO|WM\s?SUPERCENTER|WALMART|STOKES|SMITH.S|KROGER|TRADER JOE|WHOLE FOOD|WINCO|HARMON|MACEYS|SPROUTS|ALDI|SAFEWAY|FRESH FOOD|FROSTOP/.test(d)) return "groceries";
-                if (/MCDONALD|CHICK.FIL|SUBWAY|WENDY|BURGER|TACO|PIZZA|CAFE|PANERA|STARBUCKS|DUTCH.BROS|SONIC|OLIVE.GARDEN|TEXAS.ROAD|RED.ROBIN|APPLEBEE|IHOP|DENNY|WAFFLE|SWIG|KNEADERS|CAFE.RIO|ZUPAS|CHIPOTLE|DOMINO|RAISING|IN-N-OUT|CULVER|FIVE.GUYS|CRUMBL|TAILWIND|FIIZ|JIMMY.JOHN|HIVE/.test(d)) return "dining";
+                if (/MCDONALD|CHICK.FIL|SUBWAY|WENDY|BURGER|TACO|PIZZA|CAFE|PANERA|STARBUCKS|DUTCH.BROS|SONIC|OLIVE.GARDEN|TEXAS.ROAD|RED.ROBIN|APPLEBEE|IHOP|DENNY|WAFFLE|SWIG|KNEADERS|CAFE.RIO|ZUPAS|CHIPOTLE|DOMINO|RAISING|IN-N-OUT|CULVER|FIVE.GUYS|CRUMBL|TAILWIND|FIIZ|JIMMY.JOHN|HIVE|CUPBOP|CUBBY/.test(d)) return "dining";
                 if (/CHEVRON|SHELL|MAVERIK|MAVERICK|EXXON|MOBIL|SINCLAIR|PHILLIPS|PILOT|LOVE.S|AUTOZONE|JIFFY.LUBE|FIRESTONE|VALVOLINE|NAPA.AUTO|UBER|LYFT|DISCOUNT.TIRE/.test(d)) return "transport";
-                if (/NETFLIX|HULU|DISNEY|SPOTIFY|APPLE.COM|GOOGLE|AUDIBLE|YOUTUBE|SLING|VIVINT|ADT|FITNESS|GYM|INSURANCE|AT&T|VERIZON|T-MOBILE|COMCAST|XFINITY|NINTENDO|VIDANGEL/.test(d)) return "recurring";
+                if (/NETFLIX|HULU|DISNEY|SPOTIFY|APPLE.COM|GOOGLE|AUDIBLE|YOUTUBE|SLING|PEACOCK|PARAMOUNT|HBO|VIVINT|ADT|FITNESS|GYM|INSURANCE|AT&T|VERIZON|T-MOBILE|COMCAST|XFINITY|NINTENDO|VIDANGEL|PAYPAL.*DISNEY|PAYPAL.*NETFLIX|PAYPAL.*HULU/.test(d)) return "recurring";
                 if (/AMAZON|NIKE|TARGET|NORDSTROM|MACY|KOHL|OLD.NAVY|GAP|DICK.S|SCHEELS|HOMEGOODS|TJ.MAXX|MARSHALLS|ROSS|EBAY|ETSY|CVS|WALGREEN|WALMART.COM/.test(d)) return "shopping";
                 if (/BYU|TICKET/.test(d)) return "other";
                 return "other";
@@ -1595,7 +1633,11 @@ export default function App() {
               }
 
               // ── Citi website copy-paste format ──────────────────────────
-              if (text.includes("Eligible for Citi") || text.includes("Citi® Flex Pay") || text.includes("Citi Flex Pay")) {
+              // Detect: explicit Citi markers, OR generic date→description→amount pattern
+              // (covers both the full statement view and the pending/simple view)
+              const hasCitiMarker = text.includes("Eligible for Citi") || text.includes("Citi® Flex Pay") || text.includes("Citi Flex Pay");
+              const hasDateAmountPattern = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4}$/m.test(text) && /^\$[\d,]+\.\d{2}$/m.test(text);
+              if (hasCitiMarker || hasDateAmountPattern) {
                 return parseCitiWeb(text);
               }
 
@@ -1720,7 +1762,7 @@ export default function App() {
               return { format, rows, error: null };
             };
 
-            return <ImportTab parseCSV={parseCSV} expenses={allExpenses} setAllExpenses={setAllExpenses} upsertExpense={upsertExpense} curPeriodKey={curPeriodKey} funds={funds} periodStart={periodStart} periodEnd={periodEnd} T={T} iStyle={iStyle} fmt={fmt} CATEGORIES={CATEGORIES} setSyncStatus={setSyncStatus} setSyncError={setSyncError} />;
+            return <ImportTab parseCSV={parseCSV} expenses={allExpenses} historyExpenses={historyExpenses} setAllExpenses={setAllExpenses} upsertExpense={upsertExpense} curPeriodKey={curPeriodKey} funds={funds} periodStart={periodStart} periodEnd={periodEnd} T={T} iStyle={iStyle} fmt={fmt} CATEGORIES={CATEGORIES} setSyncStatus={setSyncStatus} setSyncError={setSyncError} />;
           })()}
 
           {/* ── HISTORY ── */}
