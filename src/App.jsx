@@ -1342,7 +1342,26 @@ export default function App() {
             const parseCSV = (text) => {
               const lines = text.trim().split(/\r?\n/);
               if (lines.length < 2) return { error: "No data found" };
-              const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
+
+              // Auto-detect delimiter: tab vs comma
+              const firstLine = lines[0];
+              const tabCount = (firstLine.match(/\t/g) || []).length;
+              const commaCount = (firstLine.match(/,/g) || []).length;
+              const delim = tabCount > commaCount ? "\t" : ",";
+
+              const splitRow = (line) => {
+                if (delim === "\t") return line.split("\t").map((f) => f.trim().replace(/^"|"$/g, ""));
+                // CSV comma split respecting quotes
+                const row = []; let cur = ""; let inQ = false;
+                for (const ch of line + ",") {
+                  if (ch === '"') { inQ = !inQ; }
+                  else if (ch === "," && !inQ) { row.push(cur.trim()); cur = ""; }
+                  else { cur += ch; }
+                }
+                return row;
+              };
+
+              const headers = splitRow(lines[0]).map((h) => h.toLowerCase());
 
               // Detect format
               const has = (name) => headers.some((h) => h.includes(name));
@@ -1388,14 +1407,8 @@ export default function App() {
 
               const rows = [];
               for (let i = 1; i < lines.length; i++) {
-                // Handle quoted fields with commas inside
-                const row = [];
-                let cur = ""; let inQ = false;
-                for (const ch of lines[i] + ",") {
-                  if (ch === '"') { inQ = !inQ; }
-                  else if (ch === "," && !inQ) { row.push(cur.trim()); cur = ""; }
-                  else { cur += ch; }
-                }
+                if (!lines[i].trim()) continue;
+                const row = splitRow(lines[i]);
 
                 let date, desc, amount, type = "";
                 try {
