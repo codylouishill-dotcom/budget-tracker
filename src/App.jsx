@@ -543,6 +543,7 @@ export default function App() {
 
   const removeExpense = async (id) => {
     setAllExpenses((prev) => prev.filter((e) => e.id !== String(id)));
+    setHistoryExpenses((prev) => prev.filter((e) => e.id !== String(id)));
     setSyncStatus("saving");
     try { await deleteExpense(String(id)); setSyncStatus("idle"); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
   };
@@ -554,6 +555,7 @@ export default function App() {
     const finalAmt = editingExpense.isCredit ? -amt : amt;
     const updated = { ...allExpenses.find((e) => e.id === editingExpense.id), amount: finalAmt, label: editingExpense.label.trim(), category: editingExpense.category, fund_id: editingExpense.fund_id || null };
     setAllExpenses((prev) => prev.map((e) => e.id === editingExpense.id ? updated : e));
+    setHistoryExpenses((prev) => prev.map((e) => e.id === editingExpense.id ? updated : e));
     setEditingExpense(null);
     setSyncStatus("saving");
     try { await upsertExpense(updated); setSyncStatus("idle"); } catch (e) { setSyncStatus("error"); setSyncError(e.message); }
@@ -609,10 +611,11 @@ export default function App() {
   };
 
   const moveExpenseToFund = async (expId, fundId) => {
-    const exp = allExpenses.find((e) => e.id === expId);
+    const exp = allExpenses.find((e) => e.id === expId) || historyExpenses.find((e) => e.id === expId);
     if (!exp || !fundId) return;
-    // Remove from budget expenses
+    // Remove from budget expenses and history
     setAllExpenses((prev) => prev.filter((e) => e.id !== expId));
+    setHistoryExpenses((prev) => prev.filter((e) => e.id !== expId));
     // Add as fund transaction
     const tx = {
       id: String(Date.now()),
@@ -1586,142 +1589,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Large transactions filter */}
-              <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
-                {/* Header / toggle */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", cursor: "pointer" }}
-                  onClick={() => setShowLarge((v) => !v)}>
-                  <div>
-                    <div style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim }}>LARGE TRANSACTIONS</div>
-                    <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
-                      {expenses.filter(e => parseFloat(e.amount) >= largeThreshold).length} over {fmt(largeThreshold)}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {/* Threshold input */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={e => e.stopPropagation()}>
-                      <span style={{ fontSize: 12, color: T.textMuted }}>$</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        value={largeThreshold}
-                        onChange={(e) => setLargeThreshold(Math.max(0, parseFloat(e.target.value) || 0))}
-                        style={{ width: 60, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "4px 7px", fontFamily: "inherit", outline: "none", textAlign: "right" }}
-                      />
-                    </div>
-                    <span style={{ fontSize: 11, color: T.textDim, transform: showLarge ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
-                  </div>
-                </div>
-
-                {showLarge && (() => {
-                  const large = [...expenses]
-                    .filter(e => parseFloat(e.amount) >= largeThreshold)
-                    .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
-
-                  if (large.length === 0) return (
-                    <div style={{ padding: "14px 16px", fontSize: 12, color: T.textFaint, textAlign: "center", borderTop: `1px solid ${T.border}` }}>
-                      No transactions over {fmt(largeThreshold)}
-                    </div>
-                  );
-
-                  return (
-                    <div style={{ borderTop: `1px solid ${T.border}` }}>
-                      {large.map((e) => {
-                        const cat = CATEGORIES.find((c) => c.id === e.category);
-                        const fund = funds.find((f) => f.id === e.fund_id);
-                        const isEditingThis = editingLarge?.id === e.id;
-                        return (
-                          <div key={e.id} style={{ borderBottom: `1px solid ${T.surface3}` }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                                <div style={{ width: 30, height: 30, borderRadius: 8, background: `${cat.color}22`, border: `1px solid ${cat.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>{cat.icon}</div>
-                                <div style={{ minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
-                                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
-                                    {new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                                    <span style={{ marginLeft: 6, color: cat.color }}>{cat.label}</span>
-                                    {fund && <span style={{ marginLeft: 6, color: T.accent }}>· {fund.icon} {fund.name}</span>}
-                                  </div>
-                                </div>
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                                <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{fmt(parseFloat(e.amount))}</div>
-                                <button className="btn"
-                                  onClick={() => isEditingThis ? setEditingLarge(null) : setEditingLarge({ id: e.id, amount: String(parseFloat(e.amount)), label: e.label, category: e.category, isCredit: false, fund_id: e.fund_id || null, editFundMode: e.fund_id ? "tag" : "none" })}
-                                  style={{ background: isEditingThis ? T.surface2 : "none", border: isEditingThis ? `1px solid ${T.border}` : "none", borderRadius: 6, color: isEditingThis ? T.accent : T.textDim, fontSize: 11, padding: "2px 7px", fontFamily: "inherit" }}>
-                                  {isEditingThis ? "cancel" : "edit"}
-                                </button>
-                              </div>
-                            </div>
-                            {/* Edit form */}
-                            {isEditingThis && (
-                              <div style={{ background: T.surface2, padding: "10px 16px 12px" }}>
-                                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                                  <input type="number" inputMode="decimal" value={editingLarge.amount}
-                                    onChange={(ev) => setEditingLarge((p) => ({ ...p, amount: ev.target.value }))}
-                                    style={{ flex: "0 0 100px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 15, padding: "7px 9px", fontFamily: "inherit", outline: "none" }} />
-                                  <input type="text" value={editingLarge.label}
-                                    onChange={(ev) => setEditingLarge((p) => ({ ...p, label: ev.target.value }))}
-                                    onKeyDown={(ev) => { if (ev.key === "Enter") { const amt = parseFloat(editingLarge.amount); if (amt > 0 && editingLarge.label.trim()) { const updated = { ...allExpenses.find(ex => ex.id === editingLarge.id), amount: amt, label: editingLarge.label.trim(), category: editingLarge.category, fund_id: editingLarge.editFundMode === "none" ? null : editingLarge.fund_id }; setAllExpenses(prev => prev.map(ex => ex.id === updated.id ? updated : ex)); setEditingLarge(null); upsertExpense(updated); } } }}
-                                    style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 9px", fontFamily: "inherit", outline: "none" }} />
-                                </div>
-                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-                                  {CATEGORIES.map((c) => (
-                                    <button key={c.id} className="btn" onClick={() => setEditingLarge((p) => ({ ...p, category: c.id }))}
-                                      style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: editingLarge.category === c.id ? `${c.color}33` : T.surface3, border: `1px solid ${editingLarge.category === c.id ? c.color : T.border}`, color: editingLarge.category === c.id ? c.color : T.textMuted }}>
-                                      {c.icon} {c.label}
-                                    </button>
-                                  ))}
-                                </div>
-                                {funds.length > 0 && (
-                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-                                    <span style={{ fontSize: 9, color: T.textDim, letterSpacing: "0.08em" }}>FUND:</span>
-                                    {[{ mode: "none", label: "None" }, { mode: "tag", label: "Tag" }, { mode: "move", label: "Move" }].map(({ mode, label }) => (
-                                      <button key={mode} className="btn" onClick={() => setEditingLarge((p) => ({ ...p, editFundMode: mode, fund_id: mode === "none" ? null : p.fund_id }))}
-                                        style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: (editingLarge.editFundMode || "none") === mode ? T.accent+"33" : T.surface3, border: `1px solid ${(editingLarge.editFundMode || "none") === mode ? T.accent : T.border}`, color: (editingLarge.editFundMode || "none") === mode ? T.accent : T.textMuted }}>
-                                        {label}
-                                      </button>
-                                    ))}
-                                    {editingLarge.editFundMode && editingLarge.editFundMode !== "none" && funds.map((f) => (
-                                      <button key={f.id} className="btn" onClick={() => setEditingLarge((p) => ({ ...p, fund_id: p.fund_id === f.id ? null : f.id }))}
-                                        style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: editingLarge.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${editingLarge.fund_id === f.id ? T.accent : T.border}`, color: editingLarge.fund_id === f.id ? T.accent : T.textMuted }}>
-                                        {f.icon} {f.name}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                                {editingLarge.editFundMode === "move" && editingLarge.fund_id && (
-                                  <button className="btn" onClick={() => moveExpenseToFund(editingLarge.id, editingLarge.fund_id).then(() => setEditingLarge(null))}
-                                    style={{ width: "100%", background: "#E8D06A22", border: "1px solid #E8D06A44", borderRadius: 6, padding: "7px", fontSize: 11, color: "#E8D06A", fontFamily: "inherit", marginBottom: 6 }}>
-                                    Move to {funds.find(f => f.id === editingLarge.fund_id)?.name} (removes from budget)
-                                  </button>
-                                )}
-                                <div style={{ display: "flex", gap: 6 }}>
-                                  <button className="btn" onClick={() => {
-                                    const amt = parseFloat(editingLarge.amount);
-                                    if (!amt || !editingLarge.label.trim()) return;
-                                    const updated = { ...allExpenses.find(ex => ex.id === editingLarge.id), amount: amt, label: editingLarge.label.trim(), category: editingLarge.category, fund_id: editingLarge.editFundMode === "none" ? null : (editingLarge.fund_id || null) };
-                                    setAllExpenses(prev => prev.map(ex => ex.id === updated.id ? updated : ex));
-                                    setEditingLarge(null);
-                                    setSyncStatus("saving");
-                                    upsertExpense(updated).then(() => setSyncStatus("idle")).catch(() => setSyncStatus("error"));
-                                  }} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 7, padding: "9px", fontSize: 12, fontWeight: 500, fontFamily: "inherit" }}>SAVE</button>
-                                  <button className="btn" onClick={() => { removeExpense(e.id); setEditingLarge(null); }}
-                                    style={{ padding: "9px 12px", background: "#E86A6A22", border: "1px solid #E86A6A44", color: "#E86A6A", borderRadius: 7, fontSize: 12, fontFamily: "inherit" }}>Delete</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "space-between", fontSize: 11, color: T.textMuted, borderTop: `1px solid ${T.border}` }}>
-                        <span>{large.length} transactions</span>
-                        <span style={{ fontWeight: 500, color: T.text }}>{fmt(large.reduce((s, e) => s + parseFloat(e.amount), 0))}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
             </div>
           )}
 
@@ -2398,6 +2265,139 @@ export default function App() {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Large transactions across all history */}
+              <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", cursor: "pointer" }}
+                  onClick={() => setShowLarge((v) => !v)}>
+                  <div>
+                    <div style={{ fontSize: 10, letterSpacing: "0.12em", color: T.textDim }}>LARGE TRANSACTIONS</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
+                      {historyExpenses.filter(e => parseFloat(e.amount) >= largeThreshold).length} over {fmt(largeThreshold)} — all months
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={ev => ev.stopPropagation()}>
+                      <span style={{ fontSize: 12, color: T.textMuted }}>$</span>
+                      <input type="number" inputMode="decimal" value={largeThreshold}
+                        onChange={(ev) => setLargeThreshold(Math.max(0, parseFloat(ev.target.value) || 0))}
+                        style={{ width: 60, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "4px 7px", fontFamily: "inherit", outline: "none", textAlign: "right" }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: T.textDim, transform: showLarge ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                  </div>
+                </div>
+                {showLarge && (() => {
+                  const large = [...historyExpenses]
+                    .filter(e => parseFloat(e.amount) >= largeThreshold)
+                    .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
+                  if (large.length === 0) return (
+                    <div style={{ padding: "14px 16px", fontSize: 12, color: T.textFaint, textAlign: "center", borderTop: `1px solid ${T.border}` }}>
+                      No transactions over {fmt(largeThreshold)}
+                    </div>
+                  );
+                  return (
+                    <div style={{ borderTop: `1px solid ${T.border}` }}>
+                      {large.map((e) => {
+                        const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES[CATEGORIES.length - 1];
+                        const fund = funds.find((f) => f.id === e.fund_id);
+                        const isEditingThis = editingLarge?.id === e.id;
+                        const dateLabel = new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                        return (
+                          <div key={e.id} style={{ borderBottom: `1px solid ${T.surface3}` }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                <div style={{ width: 30, height: 30, borderRadius: 8, background: `${cat.color}22`, border: `1px solid ${cat.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>{cat.icon}</div>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.label}</div>
+                                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 1 }}>
+                                    <span style={{ color: T.textMuted }}>{dateLabel}</span>
+                                    <span style={{ marginLeft: 6, color: cat.color }}>· {cat.label}</span>
+                                    {fund && <span style={{ marginLeft: 6, color: T.accent }}>· {fund.icon} {fund.name}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{fmt(parseFloat(e.amount))}</div>
+                                <button className="btn"
+                                  onClick={() => isEditingThis ? setEditingLarge(null) : setEditingLarge({ id: e.id, amount: String(parseFloat(e.amount)), label: e.label, category: e.category, isCredit: false, fund_id: e.fund_id || null, editFundMode: e.fund_id ? "tag" : "none" })}
+                                  style={{ background: isEditingThis ? T.surface2 : "none", border: isEditingThis ? `1px solid ${T.border}` : "none", borderRadius: 6, color: isEditingThis ? T.accent : T.textDim, fontSize: 11, padding: "2px 7px", fontFamily: "inherit" }}>
+                                  {isEditingThis ? "cancel" : "edit"}
+                                </button>
+                              </div>
+                            </div>
+                            {isEditingThis && (
+                              <div style={{ background: T.surface2, padding: "10px 16px 12px" }}>
+                                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                                  <input type="number" inputMode="decimal" value={editingLarge.amount}
+                                    onChange={(ev) => setEditingLarge((p) => ({ ...p, amount: ev.target.value }))}
+                                    style={{ flex: "0 0 100px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 15, padding: "7px 9px", fontFamily: "inherit", outline: "none" }} />
+                                  <input type="text" value={editingLarge.label}
+                                    onChange={(ev) => setEditingLarge((p) => ({ ...p, label: ev.target.value }))}
+                                    style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 14, padding: "7px 9px", fontFamily: "inherit", outline: "none" }} />
+                                </div>
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+                                  {CATEGORIES.map((c) => (
+                                    <button key={c.id} className="btn" onClick={() => setEditingLarge((p) => ({ ...p, category: c.id }))}
+                                      style={{ padding: "3px 8px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: editingLarge.category === c.id ? `${c.color}33` : T.surface3, border: `1px solid ${editingLarge.category === c.id ? c.color : T.border}`, color: editingLarge.category === c.id ? c.color : T.textMuted }}>
+                                      {c.icon} {c.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                {funds.length > 0 && (
+                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+                                    <span style={{ fontSize: 9, color: T.textDim, letterSpacing: "0.08em" }}>FUND:</span>
+                                    {[{ mode: "none", label: "None" }, { mode: "tag", label: "Tag" }, { mode: "move", label: "Move" }].map(({ mode, label }) => (
+                                      <button key={mode} className="btn" onClick={() => setEditingLarge((p) => ({ ...p, editFundMode: mode, fund_id: mode === "none" ? null : p.fund_id }))}
+                                        style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: (editingLarge.editFundMode || "none") === mode ? T.accent+"33" : T.surface3, border: `1px solid ${(editingLarge.editFundMode || "none") === mode ? T.accent : T.border}`, color: (editingLarge.editFundMode || "none") === mode ? T.accent : T.textMuted }}>
+                                        {label}
+                                      </button>
+                                    ))}
+                                    {editingLarge.editFundMode && editingLarge.editFundMode !== "none" && funds.map((f) => (
+                                      <button key={f.id} className="btn" onClick={() => setEditingLarge((p) => ({ ...p, fund_id: p.fund_id === f.id ? null : f.id }))}
+                                        style={{ padding: "2px 7px", borderRadius: 20, fontSize: 10, fontFamily: "inherit", background: editingLarge.fund_id === f.id ? T.accent+"33" : T.surface3, border: `1px solid ${editingLarge.fund_id === f.id ? T.accent : T.border}`, color: editingLarge.fund_id === f.id ? T.accent : T.textMuted }}>
+                                        {f.icon} {f.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                {editingLarge.editFundMode === "move" && editingLarge.fund_id && (
+                                  <button className="btn" onClick={() => moveExpenseToFund(editingLarge.id, editingLarge.fund_id).then(() => setEditingLarge(null))}
+                                    style={{ width: "100%", background: "#E8D06A22", border: "1px solid #E8D06A44", borderRadius: 6, padding: "7px", fontSize: 11, color: "#E8D06A", fontFamily: "inherit", marginBottom: 6 }}>
+                                    Move to {funds.find(f => f.id === editingLarge.fund_id)?.name} (removes from budget)
+                                  </button>
+                                )}
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button className="btn" onClick={() => {
+                                    const amt = parseFloat(editingLarge.amount);
+                                    if (!amt || !editingLarge.label.trim()) return;
+                                    const updated = { ...(historyExpenses.find(ex => ex.id === editingLarge.id) || allExpenses.find(ex => ex.id === editingLarge.id)), amount: amt, label: editingLarge.label.trim(), category: editingLarge.category, fund_id: editingLarge.editFundMode === "none" ? null : (editingLarge.fund_id || null) };
+                                    setHistoryExpenses(prev => prev.map(ex => ex.id === updated.id ? updated : ex));
+                                    setAllExpenses(prev => prev.map(ex => ex.id === updated.id ? updated : ex));
+                                    setEditingLarge(null);
+                                    setSyncStatus("saving");
+                                    upsertExpense(updated).then(() => setSyncStatus("idle")).catch(() => setSyncStatus("error"));
+                                  }} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 7, padding: "9px", fontSize: 12, fontWeight: 500, fontFamily: "inherit" }}>SAVE</button>
+                                  <button className="btn" onClick={() => {
+                                    setHistoryExpenses(prev => prev.filter(ex => ex.id !== e.id));
+                                    setAllExpenses(prev => prev.filter(ex => ex.id !== e.id));
+                                    setEditingLarge(null);
+                                    setSyncStatus("saving");
+                                    deleteExpense(e.id).then(() => setSyncStatus("idle")).catch(() => setSyncStatus("error"));
+                                  }} style={{ padding: "9px 12px", background: "#E86A6A22", border: "1px solid #E86A6A44", color: "#E86A6A", borderRadius: 7, fontSize: 12, fontFamily: "inherit" }}>Delete</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div style={{ padding: "10px 16px", display: "flex", justifyContent: "space-between", fontSize: 11, color: T.textMuted, borderTop: `1px solid ${T.border}` }}>
+                        <span>{large.length} transactions</span>
+                        <span style={{ fontWeight: 500, color: T.text }}>{fmt(large.reduce((s, e) => s + parseFloat(e.amount), 0))}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
